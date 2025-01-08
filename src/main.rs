@@ -30,44 +30,45 @@ fn create_wgpu_instance() -> wgpu::Instance {
 //
 // ========================== GEOMETRY DATA ==========================
 //
+
 #[rustfmt::skip]
 const VERTICES: &[f32] = &[
     // position (x,y,z), normal (nx,ny,nz), uv (unused)
     // +X
-    0.5,  0.5, -0.5,    1.0,  0.0,  0.0,   0.0, 0.0,
-    0.5, -0.5, -0.5,    1.0,  0.0,  0.0,   0.0, 0.0,
-    0.5, -0.5,  0.5,    1.0,  0.0,  0.0,   0.0, 0.0,
-    0.5,  0.5,  0.5,    1.0,  0.0,  0.0,   0.0, 0.0,
+    0.5,  0.5, -0.5,    1.0,  0.0,  0.0,    0.0, 0.0,
+    0.5, -0.5, -0.5,    1.0,  0.0,  0.0,    0.0, 0.0,
+    0.5, -0.5,  0.5,    1.0,  0.0,  0.0,    0.0, 0.0,
+    0.5,  0.5,  0.5,    1.0,  0.0,  0.0,    0.0, 0.0,
 
     // -X
-   -0.5,  0.5,  0.5,   -1.0,  0.0,  0.0,   0.0, 0.0,
-   -0.5, -0.5,  0.5,   -1.0,  0.0,  0.0,   0.0, 0.0,
-   -0.5, -0.5, -0.5,   -1.0,  0.0,  0.0,   0.0, 0.0,
-   -0.5,  0.5, -0.5,   -1.0,  0.0,  0.0,   0.0, 0.0,
+   -0.5,  0.5,  0.5,   -1.0,  0.0,  0.0,    0.0, 0.0,
+   -0.5, -0.5,  0.5,   -1.0,  0.0,  0.0,    0.0, 0.0,
+   -0.5, -0.5, -0.5,   -1.0,  0.0,  0.0,    0.0, 0.0,
+   -0.5,  0.5, -0.5,   -1.0,  0.0,  0.0,    0.0, 0.0,
 
     // +Y
-   -0.5,  0.5,  0.5,    0.0,  1.0,  0.0,   0.0, 0.0,
-   -0.5,  0.5, -0.5,    0.0,  1.0,  0.0,   0.0, 0.0,
-    0.5,  0.5, -0.5,    0.0,  1.0,  0.0,   0.0, 0.0,
-    0.5,  0.5,  0.5,    0.0,  1.0,  0.0,   0.0, 0.0,
+   -0.5,  0.5,  0.5,    0.0,  1.0,  0.0,    0.0, 0.0,
+   -0.5,  0.5, -0.5,    0.0,  1.0,  0.0,    0.0, 0.0,
+    0.5,  0.5, -0.5,    0.0,  1.0,  0.0,    0.0, 0.0,
+    0.5,  0.5,  0.5,    0.0,  1.0,  0.0,    0.0, 0.0,
 
     // -Y
-    0.5, -0.5,  0.5,    0.0, -1.0,  0.0,   0.0, 0.0,
-    0.5, -0.5, -0.5,    0.0, -1.0,  0.0,   0.0, 0.0,
-   -0.5, -0.5, -0.5,    0.0, -1.0,  0.0,   0.0, 0.0,
-   -0.5, -0.5,  0.5,    0.0, -1.0,  0.0,   0.0, 0.0,
+    0.5, -0.5,  0.5,    0.0, -1.0,  0.0,    0.0, 0.0,
+    0.5, -0.5, -0.5,    0.0, -1.0,  0.0,    0.0, 0.0,
+   -0.5, -0.5, -0.5,    0.0, -1.0,  0.0,    0.0, 0.0,
+   -0.5, -0.5,  0.5,    0.0, -1.0,  0.0,    0.0, 0.0,
 
     // +Z
-    0.5,  0.5,  0.5,    0.0,  0.0,  1.0,   0.0, 0.0,
-    0.5, -0.5,  0.5,    0.0,  0.0,  1.0,   0.0, 0.0,
-   -0.5, -0.5,  0.5,    0.0,  0.0,  1.0,   0.0, 0.0,
-   -0.5,  0.5,  0.5,    0.0,  0.0,  1.0,   0.0, 0.0,
+    0.5,  0.5,  0.5,    0.0,  0.0,  1.0,    0.0, 0.0,
+    0.5, -0.5,  0.5,    0.0,  0.0,  1.0,    0.0, 0.0,
+   -0.5, -0.5,  0.5,    0.0,  0.0,  1.0,    0.0, 0.0,
+   -0.5,  0.5,  0.5,    0.0,  0.0,  1.0,    0.0, 0.0,
 
     // -Z
-   -0.5,  0.5, -0.5,    0.0,  0.0, -1.0,   0.0, 0.0,
-   -0.5, -0.5, -0.5,    0.0,  0.0, -1.0,   0.0, 0.0,
-    0.5, -0.5, -0.5,    0.0,  0.0, -1.0,   0.0, 0.0,
-    0.5,  0.5, -0.5,    0.0,  0.0, -1.0,   0.0, 0.0,
+   -0.5,  0.5, -0.5,    0.0,  0.0, -1.0,    0.0, 0.0,
+   -0.5, -0.5, -0.5,    0.0,  0.0, -1.0,    0.0, 0.0,
+    0.5, -0.5, -0.5,    0.0,  0.0, -1.0,    0.0, 0.0,
+    0.5,  0.5, -0.5,    0.0,  0.0, -1.0,    0.0, 0.0,
 ];
 
 #[rustfmt::skip]
@@ -82,7 +83,6 @@ const INDICES: &[u16] = &[
 
 //
 // ================ INSTANCE DATA (position, scale, color, alpha) ================
-//
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceData {
@@ -126,7 +126,6 @@ impl InstanceData {
 
 //
 // =================== CAMERA UNIFORM ===================
-//
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
@@ -135,7 +134,6 @@ struct CameraUniform {
 
 //
 // =============== Additional Uniform: The Sun's Position ===============
-//
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct SunUniform {
@@ -144,7 +142,6 @@ struct SunUniform {
 
 //
 // =================== DUST ORBITS ===================
-//
 #[derive(Clone, Copy)]
 struct DustOrbit {
     radius: f32,
@@ -155,7 +152,6 @@ struct DustOrbit {
 
 //
 // ====================== COLOR MAPS ======================
-//
 fn planet_color_map(t: f32) -> (f32, f32, f32) {
     if t < 0.33 {
         let u = t / 0.33;
@@ -170,24 +166,17 @@ fn planet_color_map(t: f32) -> (f32, f32, f32) {
 }
 
 fn atmosphere_color_map(t: f32) -> (f32, f32, f32) {
-    // from light blue to pinkish
-    (
-        0.3 + 0.7 * t,
-        0.5 + 0.1 * t,
-        0.8 - 0.1 * t,
-    )
+    (0.3 + 0.7 * t, 0.5 + 0.1 * t, 0.8 - 0.1 * t)
 }
 
-// We use Perlin to shift cloud positions => slow movement. We'll keep color=white alpha=0.3
-// If you want color changes, you can incorporate `cloud_color_map(t)`.
+// clouds => keep color white, alpha is handled in the instance => just skip color map
+// but let's define a function so we can do a small color shift if wanted
 fn cloud_color_map(_: f32) -> (f32, f32, f32) {
-    // always white
     (1.0, 1.0, 1.0)
 }
 
 //
 // =========================== SUN CHUNK ===========================
-// We remove `#[derive(Clone)]` from SunChunk because wgpu::Buffer is not Clone
 //
 struct SunChunk {
     buffer: wgpu::Buffer,
@@ -197,11 +186,10 @@ struct SunChunk {
 
 //
 // =========================== SUN MANAGER ===========================
-// We'll do smaller radius=120, chunk=64 => fewer blocks => faster
-// We'll place center around (300,0,-100).
-//
+// We'll do a hollow shell approach => skip inside if dist < (radius - shellThickness)
 struct SunManager {
     radius: i32,
+    shell_thickness: f32,
     center: [f32; 3],
     chunk_size: i32,
     perlin1: Perlin,
@@ -219,12 +207,15 @@ struct SunManager {
 
 impl SunManager {
     fn new(radius: f32, chunk_size: i32, p1: Perlin, p2: Perlin) -> Self {
+        // place sun at (300,0,-100)
+        // We'll skip interior => shell_thickness = e.g. 10
         let center = [300.0, 0.0, -100.0];
         let r_i = radius as i32;
         let side = 2 * r_i;
         let blocks = (side as f32 / chunk_size as f32).ceil() as i32;
         SunManager {
             radius: r_i,
+            shell_thickness: 10.0,
             center,
             chunk_size,
             perlin1: p1,
@@ -263,25 +254,36 @@ impl SunManager {
                     let gx = x0 + xx;
                     let gy = y0 + yy;
                     let gz = z0 + zz;
-                    let dist2 = (gx as f32 + 0.5).powi(2)
-                        + (gy as f32 + 0.5).powi(2)
-                        + (gz as f32 + 0.5).powi(2);
-                    if dist2 < (self.radius as f32).powi(2) {
-                        let fx = gx as f32 + 0.5;
-                        let fy = gy as f32 + 0.5;
-                        let fz = gz as f32 + 0.5;
-                        let pos = [
-                            self.center[0] + fx,
-                            self.center[1] + fy,
-                            self.center[2] + fz,
-                        ];
-                        data.push(InstanceData {
-                            position: pos,
-                            scale: [2.0, 2.0, 2.0], // big blocks => fewer
-                            color: [4.0, 3.5, 0.2], // luminous placeholder
-                            alpha: 1.0,
-                        });
+                    let dist_sq = (gx as f32 + 0.5).powi(2)
+                                + (gy as f32 + 0.5).powi(2)
+                                + (gz as f32 + 0.5).powi(2);
+
+                    let r_sq_outer = (self.radius as f32).powi(2);
+                    let r_sq_inner = (self.radius as f32 - self.shell_thickness).powi(2);
+                    if dist_sq < r_sq_inner {
+                        // skip => inside
+                        continue;
                     }
+                    if dist_sq > r_sq_outer {
+                        // skip => outside
+                        continue;
+                    }
+                    // good => shell region
+                    let fx = gx as f32 + 0.5;
+                    let fy = gy as f32 + 0.5;
+                    let fz = gz as f32 + 0.5;
+                    let pos = [
+                        self.center[0] + fx,
+                        self.center[1] + fy,
+                        self.center[2] + fz,
+                    ];
+                    // sun blocks are 10× bigger => used to be scale=2 => now scale=20
+                    data.push(InstanceData {
+                        position: pos,
+                        scale: [20.0, 20.0, 20.0],
+                        color: [4.0, 3.5, 0.2], // luminous => updated each frame
+                        alpha: 1.0,
+                    });
                 }
             }
         }
@@ -295,7 +297,7 @@ impl SunManager {
             });
             queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&data));
 
-            let data_len = data.len(); // store length before moving `data`
+            let data_len = data.len();
             self.chunks.push(SunChunk {
                 buffer,
                 instances: data,
@@ -332,9 +334,9 @@ impl SunManager {
                 let v2 = 0.5 * self.perlin2.get([py, pz + t, px]);
                 let sum = v1 + v2;
                 let mapped = 0.5 * (sum + 1.0);
-                let r = 3.0 + 1.0 * mapped;
-                let g = 2.5 + 1.0 * mapped;
-                let b = 0.0 + 0.5 * mapped;
+                let r = 3.0 + mapped;   // [3..4]
+                let g = 2.5 + mapped;  // [2.5..3.5]
+                let b = 0.0 + 0.5 * mapped; // [0..0.5]
                 inst.color = [r as f32, g as f32, b as f32];
             }
             let bytes = bytemuck::cast_slice(&chunk.instances);
@@ -352,7 +354,7 @@ impl SunManager {
 }
 
 //
-// =================== PROGRAM STATE ===================
+// =========================== PROGRAM STATE ===========================
 struct State {
     surface: wgpu::Surface,
     device: wgpu::Device,
@@ -363,22 +365,25 @@ struct State {
     render_pipeline: wgpu::RenderPipeline,
     depth_texture_view: wgpu::TextureView,
 
+    // geometry
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
 
+    // planet
     planet_voxels: Vec<InstanceData>,
     atmosphere_voxels: Vec<InstanceData>,
     cloud_voxels: Vec<InstanceData>,
 
+    // dust
     dust_orbits: Vec<DustOrbit>,
     dust_instances: Vec<InstanceData>,
 
-    // combined
+    // combined planet+atmo+cloud+dust
     base_instance_buffer: wgpu::Buffer,
     base_instance_count: u32,
 
-    // chunked sun
+    // sun
     sun_manager: SunManager,
 
     camera_uniform: CameraUniform,
@@ -425,15 +430,15 @@ impl State {
         .await
         .unwrap();
 
-        let surf_caps = surface.get_capabilities(&adapter);
-        let format = surf_caps.formats[0];
+        let surface_caps = surface.get_capabilities(&adapter);
+        let format = surface_caps.formats[0];
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width: size.width,
             height: size.height,
-            present_mode: surf_caps.present_modes[0],
-            alpha_mode: surf_caps.alpha_modes[0],
+            present_mode: surface_caps.present_modes[0],
+            alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
         };
         surface.configure(&device, &config);
@@ -470,12 +475,15 @@ impl State {
         let num_indices = INDICES.len() as u32;
 
         //
-        // Planet, atmosphere, clouds, dust
+        // Build planet => hollow shell + lumps => skip inside
+        // We'll define shell_thickness=2 => skip if dist < planet_radius-2
+        // We'll incorporate lumps from random => etc.
         //
         let planet_radius = 12.0;
+        let shell_thickness_planet = 2.0;
+
         let mut planet_voxels = Vec::new();
         let mut rng = rand::thread_rng();
-
         for x in -16..16 {
             for y in -16..16 {
                 for z in -16..16 {
@@ -484,18 +492,26 @@ impl State {
                     let fz = z as f32 + 0.5;
                     let dist = (fx*fx + fy*fy + fz*fz).sqrt();
                     let noise_bump = rng.gen_range(0.0..2.0);
-                    if dist < planet_radius + noise_bump {
-                        planet_voxels.push(InstanceData {
-                            position: [fx, fy, fz],
-                            scale: [1.0, 1.0, 1.0],
-                            color: [0.5, 0.5, 0.5],
-                            alpha: 1.0,
-                        });
+                    let outer_limit = planet_radius + noise_bump;
+                    let inner_limit = planet_radius - shell_thickness_planet;
+                    if dist < inner_limit {
+                        continue; // skip inside
                     }
+                    if dist > outer_limit {
+                        continue; // skip outside
+                    }
+                    // keep => shell region
+                    planet_voxels.push(InstanceData {
+                        position: [fx, fy, fz],
+                        scale: [1.0, 1.0, 1.0],
+                        color: [0.5, 0.5, 0.5],
+                        alpha: 1.0,
+                    });
                 }
             }
         }
-        // ice poles
+
+        // poles white
         let polar_threshold = 0.9 * planet_radius;
         for v in &mut planet_voxels {
             if v.position[1].abs() > polar_threshold {
@@ -503,14 +519,18 @@ impl State {
             }
         }
 
-        // atmosphere
+        // atmosphere => also shell => about +1 bigger => shell_thickness=1 => skip inside dist < planet_radius => but we do lumps?
+        // We'll keep same approach => if dist> planet_radius => do partial approach
         let mut atmosphere_voxels = Vec::new();
+        let atmo_shell_outward = 1.05; // only ~5% bigger
         for v in &planet_voxels {
             let dist = (v.position[0]*v.position[0]
-                + v.position[1]*v.position[1]
-                + v.position[2]*v.position[2]).sqrt();
-            if dist > planet_radius - 1.0 {
-                let outward = 1.05;
+                      + v.position[1]*v.position[1]
+                      + v.position[2]*v.position[2]).sqrt();
+            // if it's near outer => keep
+            if dist > planet_radius - 2.0 {
+                let outward = atmo_shell_outward;
+                let scale = [1.0,1.0,1.0];
                 let pos = [
                     v.position[0]*outward / dist.max(0.0001),
                     v.position[1]*outward / dist.max(0.0001),
@@ -518,35 +538,38 @@ impl State {
                 ];
                 atmosphere_voxels.push(InstanceData {
                     position: pos,
-                    scale: [1.0, 1.0, 1.0],
+                    scale,
                     color: [0.3, 0.5, 0.8],
                     alpha: 0.2,
                 });
             }
         }
 
-        // big translucent blocks for clouds => also use perlin offset => movement
+        // clouds => large blocks => scale=5 => above surface => e.g. outward=1.3 => skip inside
         let mut cloud_voxels = Vec::new();
+        let cloud_outward = 1.3;
         for v in &planet_voxels {
-            let dist = (v.position[0].powi(2) + v.position[1].powi(2) + v.position[2].powi(2)).sqrt();
-            if dist > planet_radius - 1.0 && rng.gen_bool(0.2) {
-                // 20% => sparser
-                let outward = 1.1;
+            let dist = (v.position[0].powi(2)
+                       + v.position[1].powi(2)
+                       + v.position[2].powi(2)).sqrt();
+            if dist > planet_radius - 3.0 && rng.gen_bool(0.2) {
                 let pos = [
-                    v.position[0]*outward / dist.max(0.0001),
-                    v.position[1]*outward / dist.max(0.0001),
-                    v.position[2]*outward / dist.max(0.0001),
+                    v.position[0]*cloud_outward / dist.max(0.0001),
+                    v.position[1]*cloud_outward / dist.max(0.0001),
+                    v.position[2]*cloud_outward / dist.max(0.0001),
                 ];
                 cloud_voxels.push(InstanceData {
                     position: pos,
-                    scale: [2.0, 2.0, 2.0],
+                    scale: [5.0, 5.0, 5.0], // bigger chunks
                     color: [1.0, 1.0, 1.0],
                     alpha: 0.3,
                 });
             }
         }
 
+        //
         // dust
+        //
         let mut dust_orbits = Vec::new();
         let mut dust_instances = Vec::new();
         for _ in 0..300 {
@@ -569,7 +592,7 @@ impl State {
             });
         }
 
-        // combine
+        // combine planet+atmo+cloud+dust
         let combined = [
             planet_voxels.as_slice(),
             atmosphere_voxels.as_slice(),
@@ -583,10 +606,10 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        // chunked sun => smaller radius=120 => fewer voxels, chunk=64 => big blocks => faster
+        // sun => smaller radius=120, chunk=64 => big blocks => 10x bigger => done in manager
         let sun_manager = SunManager::new(120.0, 64, Perlin::new(1), Perlin::new(2));
 
-        // camera uniform
+        // camera
         let camera_uniform = CameraUniform {
             view_proj: Mat4::IDENTITY.to_cols_array(),
         };
@@ -596,7 +619,7 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // sun pos uniform => must match sun_manager.center
+        // sun pos => same as sun_manager => (300,0,-100)
         let sun_uniform = SunUniform {
             sun_pos: [300.0, 0.0, -100.0, 1.0],
         };
@@ -606,10 +629,10 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // bind group
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Globals BGL"),
             entries: &[
+                // camera
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -620,6 +643,7 @@ impl State {
                     },
                     count: None,
                 },
+                // sun pos
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -647,13 +671,13 @@ impl State {
             ],
         });
 
-        // WGSL shader
+        // WGSL
         let shader_src = r#"
 struct Globals {
-    viewProj: mat4x4<f32>,
+    viewProj: mat4x4<f32>;
 };
 struct Sun {
-    sunPos: vec4<f32>,
+    sunPos: vec4<f32>;
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -691,9 +715,9 @@ fn vs_main(
     out.worldPos = worldPos;
 
     let fix = vec3<f32>(
-        1.0/inst.scale.x,
-        1.0/inst.scale.y,
-        1.0/inst.scale.z
+        1.0 / inst.scale.x,
+        1.0 / inst.scale.y,
+        1.0 / inst.scale.z
     );
     out.normal = normalize(inNormal * fix);
 
@@ -709,11 +733,10 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
     if (in.color.r > 3.0) {
         return vec4<f32>(in.color, 1.0);
     }
+
     let sunPos = sunData.sunPos.xyz;
     let dir = normalize(sunPos - in.worldPos);
     let lambert = max(dot(in.normal, dir), 0.0);
-
-    // handle alpha => partial translucency
     let finalColor = in.color * lambert;
     return vec4<f32>(finalColor, in.alpha);
 }
@@ -737,6 +760,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
                 module: &shader_module,
                 entry_point: "vs_main",
                 buffers: &[
+                    // geometry
                     wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<f32>() as wgpu::BufferAddress * 8,
                         step_mode: wgpu::VertexStepMode::Vertex,
@@ -747,17 +771,18 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
                                 format: wgpu::VertexFormat::Float32x3,
                             },
                             wgpu::VertexAttribute {
-                                offset: (4*3) as wgpu::BufferAddress,
+                                offset: (4 * 3) as wgpu::BufferAddress,
                                 shader_location: 1,
                                 format: wgpu::VertexFormat::Float32x3,
                             },
                             wgpu::VertexAttribute {
-                                offset: (4*6) as wgpu::BufferAddress,
+                                offset: (4 * 6) as wgpu::BufferAddress,
                                 shader_location: 2,
                                 format: wgpu::VertexFormat::Float32x2,
                             },
                         ],
                     },
+                    // instance
                     InstanceData::desc(),
                 ],
             },
@@ -798,7 +823,6 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             size,
             render_pipeline,
             depth_texture_view,
-
             vertex_buffer,
             index_buffer,
             num_indices,
@@ -827,14 +851,12 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             camera_yaw: 0.0,
             camera_pitch: 0.3,
             camera_dist: 80.0,
+
             last_mouse_pos: None,
             mouse_pressed: false,
         }
     }
 
-    //
-    // ============ RESIZE ============
-    //
     fn resize(&mut self, new_size: PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
@@ -861,9 +883,6 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         }
     }
 
-    //
-    // ============ UPDATE ============
-    //
     fn update(&mut self) {
         self.time += 0.01;
 
@@ -901,21 +920,18 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             a.color = [r,g,b];
         }
 
-        // clouds => let them "move around slowly" by shifting positions
-        // We do a gentle offset from Perlin each frame
-        let freq_cloud = 0.002; // smaller => slower shift
+        // clouds => large blocks => slow perlin-based motion
+        let freq_cloud = 0.001; // slower
         for c in &mut self.cloud_voxels {
             let (x,y,z) = (c.position[0], c.position[1], c.position[2]);
             let px = x as f64 * freq_cloud;
             let py = y as f64 * freq_cloud;
             let pz = z as f64 * freq_cloud;
-            let t = self.time as f64 * 0.1; // slower
-            let shiftx = 0.2 * self.perlin1.get([px + t, py, pz]);
-            let shifty = 0.2 * self.perlin2.get([py + t, pz, px]);
-            // re-offset position
+            let t = self.time as f64 * 0.15;
+            let shiftx = 0.1 * self.perlin1.get([px + t, py, pz]);
+            let shifty = 0.1 * self.perlin2.get([py + t, pz, px]);
             c.position[0] += shiftx as f32;
             c.position[1] += shifty as f32;
-            // alpha stays 0.3 => translucent
         }
 
         // dust
@@ -927,17 +943,21 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             self.dust_instances[i].position = [x,y,z];
         }
 
-        // re-write planet+atmo+cloud+dust
+        // rewrite planet+atmo+cloud+dust
         let re_combined = [
             self.planet_voxels.as_slice(),
             self.atmosphere_voxels.as_slice(),
             self.cloud_voxels.as_slice(),
             self.dust_instances.as_slice(),
         ].concat();
-        self.queue.write_buffer(&self.base_instance_buffer, 0, bytemuck::cast_slice(&re_combined));
+        self.queue.write_buffer(
+            &self.base_instance_buffer,
+            0,
+            bytemuck::cast_slice(&re_combined),
+        );
 
-        // sun => generate some chunks, update color
-        self.sun_manager.generate_chunks_per_frame(&self.device, &self.queue, 5);
+        // sun => chunk-based => generate & color
+        self.sun_manager.generate_chunks_per_frame(&self.device, &self.queue, 3);
         self.sun_manager.update_color_perlin(&self.queue, self.time);
 
         // camera
@@ -962,9 +982,6 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         );
     }
 
-    //
-    // ============ RENDER ============
-    //
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let frame = self.surface.get_current_texture()?;
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -975,25 +992,21 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         {
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("MainRenderPass"),
-                color_attachments: &[
-                    Some(
-                        wgpu::RenderPassColorAttachment {
-                            view: &view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(
-                                    wgpu::Color {
-                                        r: 0.0,
-                                        g: 0.0,
-                                        b: 0.01,
-                                        a: 1.0,
-                                    }
-                                ),
-                                store: true,
-                            },
-                        }
-                    )
-                ],
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(
+                            wgpu::Color {
+                                r: 0.0,
+                                g: 0.0,
+                                b: 0.01,
+                                a: 1.0,
+                            }
+                        ),
+                        store: true,
+                    },
+                })],
                 depth_stencil_attachment: Some(
                     wgpu::RenderPassDepthStencilAttachment {
                         view: &self.depth_texture_view,
@@ -1009,7 +1022,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             rp.set_pipeline(&self.render_pipeline);
             rp.set_bind_group(0, &self.bind_group, &[]);
 
-            // draw planet+atmo+cloud+dust
+            // draw planet+atmosphere+clouds+dust
             rp.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             rp.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             rp.set_vertex_buffer(1, self.base_instance_buffer.slice(..));
@@ -1024,9 +1037,6 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         Ok(())
     }
 
-    //
-    // ============ INPUT ============
-    //
     fn input(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::MouseInput { state, button, .. } => {
@@ -1072,8 +1082,6 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
 
 //
 // ===================== MAIN + EVENT LOOP =====================
-//
-
 fn main() {
     env_logger::init();
     pollster::block_on(run());
@@ -1082,7 +1090,7 @@ fn main() {
 async fn run() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-        .with_title("WGSL Voxel Planet + Big Sun + Clouds + Apple/Metal autodetect")
+        .with_title("Hollow Planet + Big Chunky Clouds + Noisy Shell Sun (Apple/Metal autodetect)")
         .build(&event_loop)
         .unwrap();
 
