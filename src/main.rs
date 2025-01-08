@@ -9,7 +9,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat4, Vec3};
 use rand::Rng;
 use noise::{NoiseFn, Perlin};
 
@@ -531,11 +531,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
             instance_buffer,
             num_instances_total,
 
-            // Generate a random u32 seed using the existing RNG
-            let seed: u32 = rng.gen();
-            
-            // Initialize Perlin with the generated seed
-            perlin: Perlin::new(seed),
+            perlin: Perlin::new(1),
             camera_uniform,
             camera_buffer,
             camera_bind_group,
