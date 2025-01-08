@@ -650,7 +650,7 @@ impl State {
         // WGSL shader
         let shader_src = r#"
 struct Globals {
-    viewProj: mat4x4<f32>;
+    viewProj: mat4x4<f32>,
 };
 struct Sun {
     sunPos: vec4<f32>;
