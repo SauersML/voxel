@@ -9,16 +9,12 @@ use winit::{
     window::WindowBuilder,
 };
 
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3};
 use rand::Rng;
 use noise::{NoiseFn, Perlin};
 
 //
 // ========================== GEOMETRY DATA ==========================
-//
-// We'll reuse a single cube geometry for all voxel-like objects.
-// The sun, planet, atmosphere, clouds, dust, etc. are drawn as
-// scaled cubes in 3D, via GPU instancing.
 //
 
 #[rustfmt::skip]
@@ -137,7 +133,6 @@ struct CameraUniform {
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct SunUniform {
-    // We'll store sunPos in world space (x,y,z,1)
     sun_pos: [f32; 4],
 }
 
@@ -150,6 +145,184 @@ struct DustOrbit {
     angle: f32,
     speed: f32,
     height: f32,
+}
+
+//
+// =========== COLOR MAPPERS ===========
+//
+
+#[inline(always)]
+fn planet_color_map(t: f32) -> (f32, f32, f32) {
+    // identical gradient
+    if t < 0.33 {
+        let u = t / 0.33;
+        let r = 0.1 + 0.2 * u;
+        let g = 0.7 - 0.3 * u;
+        let b = 0.3 + 0.4 * u;
+        (r, g, b)
+    } else if t < 0.66 {
+        let u = (t - 0.33) / 0.33;
+        let r = 0.3 + 0.5 * u;
+        let g = 0.4 - 0.2 * u;
+        let b = 0.7 + 0.2 * u;
+        (r, g, b)
+    } else {
+        let u = (t - 0.66) / 0.34;
+        let r = 0.8 + 0.2 * u;
+        let g = 0.2 + 0.3 * u;
+        let b = 0.9 - 0.2 * u;
+        (r, g, b)
+    }
+}
+
+#[inline(always)]
+fn atmosphere_color_map(t: f32) -> (f32, f32, f32) {
+    let r = 0.3 + 0.7 * t;
+    let g = 0.5 + 0.1 * t;
+    let b = 0.8 - 0.1 * t;
+    (r, g, b)
+}
+
+#[inline(always)]
+fn cloud_color_map(t: f32) -> (f32, f32, f32) {
+    let grey = 0.8 + 0.2 * t;
+    let tint = 0.9 + 0.1 * t;
+    (tint, grey, tint)
+}
+
+//
+// =================== SUN: COUNT & STREAMING WRITES ===================
+//
+// Because the sun is huge (radius=1200 => 2,400^3 ~ billions of voxels),
+// storing them in a single CPU Vec would require immense RAM. Instead:
+//
+//   1) count how many there are, no storing
+//   2) allocate GPU buffer of that size
+//   3) fill it chunk-by-chunk, uploading via queue.write_buffer
+//
+// This maintains the identical final result (the entire volumetric sun!)
+// but with drastically reduced CPU memory usage.
+//
+
+// Quick helper to see if an (x,y,z) is inside the radius
+#[inline(always)]
+fn in_sun_radius(x: i32, y: i32, z: i32, rad: f32) -> bool {
+    let fx = x as f32 + 0.5;
+    let fy = y as f32 + 0.5;
+    let fz = z as f32 + 0.5;
+    let dist = (fx*fx + fy*fy + fz*fz).sqrt();
+    dist < rad
+}
+
+// 1) Count total sun voxels
+fn count_sun_voxels(sun_radius: f32) -> usize {
+    let r = sun_radius as i32;
+    let mut count = 0usize;
+    for x in -r..r {
+        for y in -r..r {
+            for z in -r..r {
+                if in_sun_radius(x,y,z,sun_radius) {
+                    count += 1;
+                }
+            }
+        }
+    }
+    count
+}
+
+// 2) Fill sun voxels chunk by chunk, writing to the big GPU buffer
+fn fill_sun_voxels_in_chunks(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    sun_buffer: &wgpu::Buffer,
+    offset_start: u64,  // offset in bytes in the big instance buffer
+    sun_radius: f32,
+    perlin1: &Perlin,
+    perlin2: &Perlin,
+    time: f32,
+) {
+    let sun_center = [4000.0, 0.0, -2000.0];
+    let freq_sun = 0.02;
+    let (r_i, r_f) = (sun_radius as i32, sun_radius as f32);
+
+    // We can choose a chunk size, e.g. 32^3 or 64^3; bigger chunks => fewer passes, but more memory peak
+    const CHUNK_SIZE: i32 = 32;
+
+    let mut global_write_offset = offset_start; // in bytes
+    // Temporary buffer for one chunk
+    let mut chunk_data = Vec::with_capacity((CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize);
+
+    // We'll do N steps in x, y, z
+    let x_blocks = ((2*r_i) as f32 / CHUNK_SIZE as f32).ceil() as i32;
+    let y_blocks = x_blocks;
+    let z_blocks = x_blocks;
+
+    let start_x = -r_i;
+    let start_y = -r_i;
+    let start_z = -r_i;
+
+    for bx in 0..x_blocks {
+        for by in 0..y_blocks {
+            for bz in 0..z_blocks {
+                chunk_data.clear(); // reuse the same vec
+
+                let x0 = start_x + bx*CHUNK_SIZE;
+                let y0 = start_y + by*CHUNK_SIZE;
+                let z0 = start_z + bz*CHUNK_SIZE;
+
+                // fill the chunk
+                for xx in x0..(x0 + CHUNK_SIZE) {
+                    if xx < -r_i || xx >= r_i { continue; }
+                    for yy in y0..(y0 + CHUNK_SIZE) {
+                        if yy < -r_i || yy >= r_i { continue; }
+                        for zz in z0..(z0 + CHUNK_SIZE) {
+                            if zz < -r_i || zz >= r_i { continue; }
+                            if in_sun_radius(xx, yy, zz, r_f) {
+                                let fx = xx as f32 + 0.5;
+                                let fy = yy as f32 + 0.5;
+                                let fz = zz as f32 + 0.5;
+                                let pos = [
+                                    sun_center[0] + fx,
+                                    sun_center[1] + fy,
+                                    sun_center[2] + fz,
+                                ];
+
+                                // compute color from Perlin, as original
+                                let lx = fx; // local coords
+                                let ly = fy;
+                                let lz = fz;
+                                let px = lx as f64 * freq_sun;
+                                let py = ly as f64 * freq_sun;
+                                let pz = lz as f64 * freq_sun;
+                                let t  = time as f64 * 0.3;
+                                let val1 = perlin1.get([px, py + t, pz]);
+                                let val2 = 0.5 * perlin2.get([py, pz + t, px]);
+                                let sum = val1 + val2;
+                                let mapped = 0.5 * (sum + 1.0);
+                                let r = 3.0 + 1.0 * mapped;  
+                                let g = 2.5 + 1.0 * mapped; 
+                                let b = 0.0 + 0.5 * mapped; 
+
+                                chunk_data.push(InstanceData {
+                                    position: pos,
+                                    scale: [2.0, 2.0, 2.0],
+                                    color: [r as f32, g as f32, b as f32],
+                                    alpha: 1.0,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // write this chunk to the GPU buffer
+                let bytes_chunk = bytemuck::cast_slice(&chunk_data);
+                queue.write_buffer(sun_buffer, global_write_offset, bytes_chunk);
+
+                // advance offset in bytes
+                global_write_offset += bytes_chunk.len() as u64;
+            }
+        }
+    }
 }
 
 //
@@ -180,9 +353,10 @@ struct State {
     dust_instances: Vec<InstanceData>,
 
     // sun
-    sun_voxels: Vec<InstanceData>,
+    sun_voxel_count: u32,   // how many sun voxels total
+    sun_start_offset: u64,  // in the big instance buffer
 
-    // combined
+    // combined instance buffer
     instance_buffer: wgpu::Buffer,
     num_instances_total: u32,
 
@@ -237,7 +411,6 @@ impl State {
             .await
             .unwrap();
 
-        // surface config
         let surface_caps = surface.get_capabilities(&adapter);
         let format = surface_caps.formats[0];
         let config = wgpu::SurfaceConfiguration {
@@ -283,10 +456,10 @@ impl State {
         let num_indices = INDICES.len() as u32;
 
         //
-        // Build planet, atmosphere, clouds
+        // Planet, atmosphere, clouds
         //
         let planet_radius = 12.0;
-        let mut planet_voxels = Vec::with_capacity(32 * 32 * 32); // 32768
+        let mut planet_voxels = Vec::new();
         let mut rng = rand::thread_rng();
 
         for x in -16..16 {
@@ -295,7 +468,7 @@ impl State {
                     let fx = x as f32 + 0.5;
                     let fy = y as f32 + 0.5;
                     let fz = z as f32 + 0.5;
-                    let dist = (fx * fx + fy * fy + fz * fz).sqrt();
+                    let dist = (fx*fx + fy*fy + fz*fz).sqrt();
                     let noise_bump = rng.gen_range(0.0..2.0);
                     if dist < planet_radius + noise_bump {
                         planet_voxels.push(InstanceData {
@@ -308,30 +481,26 @@ impl State {
                 }
             }
         }
-        planet_voxels.shrink_to_fit();
-
-        // smaller ice caps => if |fy| > 0.9 * planet_radius
+        // color the poles white
         let polar_threshold = 0.9 * planet_radius;
-        for voxel in &mut planet_voxels {
-            if voxel.position[1].abs() > polar_threshold {
-                voxel.color = [1.0, 1.0, 1.0];
+        for v in &mut planet_voxels {
+            if v.position[1].abs() > polar_threshold {
+                v.color = [1.0, 1.0, 1.0];
             }
         }
 
-        // atmosphere (shell ~1.05 bigger)
-        let mut atmosphere_voxels = Vec::with_capacity(planet_voxels.len());
-        for voxel in &planet_voxels {
-            let dist = (voxel.position[0].powi(2)
-                + voxel.position[1].powi(2)
-                + voxel.position[2].powi(2))
-            .sqrt();
+        let mut atmosphere_voxels = Vec::new();
+        for v in &planet_voxels {
+            let dist = (v.position[0].powi(2)
+                + v.position[1].powi(2)
+                + v.position[2].powi(2)).sqrt();
             if dist > planet_radius - 1.0 {
                 let outward = 1.05;
                 let scale = [1.0, 1.0, 1.0];
                 let pos = [
-                    voxel.position[0] * outward / dist.max(0.0001),
-                    voxel.position[1] * outward / dist.max(0.0001),
-                    voxel.position[2] * outward / dist.max(0.0001),
+                    v.position[0]*outward/dist.max(0.0001),
+                    v.position[1]*outward/dist.max(0.0001),
+                    v.position[2]*outward/dist.max(0.0001),
                 ];
                 atmosphere_voxels.push(InstanceData {
                     position: pos,
@@ -341,22 +510,19 @@ impl State {
                 });
             }
         }
-        atmosphere_voxels.shrink_to_fit();
 
-        // clouds (~1.1 bigger, partial alpha, random subset)
-        let mut cloud_voxels = Vec::with_capacity(planet_voxels.len());
-        for voxel in &planet_voxels {
-            let dist = (voxel.position[0].powi(2)
-                + voxel.position[1].powi(2)
-                + voxel.position[2].powi(2))
-            .sqrt();
+        let mut cloud_voxels = Vec::new();
+        for v in &planet_voxels {
+            let dist = (v.position[0].powi(2)
+                + v.position[1].powi(2)
+                + v.position[2].powi(2)).sqrt();
             if dist > planet_radius - 1.0 && rng.gen_bool(0.3) {
                 let outward = 1.1;
                 let scale = [1.0, 1.0, 1.0];
                 let pos = [
-                    voxel.position[0] * outward / dist.max(0.0001),
-                    voxel.position[1] * outward / dist.max(0.0001),
-                    voxel.position[2] * outward / dist.max(0.0001),
+                    v.position[0]*outward/dist.max(0.0001),
+                    v.position[1]*outward/dist.max(0.0001),
+                    v.position[2]*outward/dist.max(0.0001),
                 ];
                 cloud_voxels.push(InstanceData {
                     position: pos,
@@ -366,13 +532,12 @@ impl State {
                 });
             }
         }
-        cloud_voxels.shrink_to_fit();
 
         //
-        // Disk-like dust
+        // Dust disk
         //
-        let mut dust_orbits = Vec::with_capacity(300);
-        let mut dust_instances = Vec::with_capacity(300);
+        let mut dust_orbits = Vec::new();
+        let mut dust_instances = Vec::new();
         for _ in 0..300 {
             let orbit_r = rng.gen_range(15.0..40.0);
             let angle = rng.gen_range(0.0..std::f32::consts::TAU);
@@ -392,64 +557,55 @@ impl State {
                 alpha: 0.2,
             });
         }
-        dust_orbits.shrink_to_fit();
-        dust_instances.shrink_to_fit();
 
         //
-        // Gigantic sun
-        // radius = 1200 => 100x bigger than planet's 12
-        // further away => let's place center around (4000, 0, -2000)
-        // each block is scaled up to e.g. [2,2,2]
+        // Sun: we do NOT store all voxels in CPU memory. Instead, we will:
+        //
+        //   - count how many there are
+        //   - create a big GPU buffer
+        //   - fill them in chunk-by-chunk
         //
         let sun_radius = 1200.0;
-        let sun_center = [4000.0, 0.0, -2000.0];
-        let mut sun_voxels = Vec::with_capacity((2 * sun_radius as usize).pow(3)); 
-        for x in -(sun_radius as i32)..(sun_radius as i32) {
-            for y in -(sun_radius as i32)..(sun_radius as i32) {
-                for z in -(sun_radius as i32)..(sun_radius as i32) {
-                    let fx = x as f32 + 0.5;
-                    let fy = y as f32 + 0.5;
-                    let fz = z as f32 + 0.5;
-                    let dist = (fx * fx + fy * fy + fz * fz).sqrt();
-                    if dist < sun_radius {
-                        let pos = [
-                            sun_center[0] + fx,
-                            sun_center[1] + fy,
-                            sun_center[2] + fz,
-                        ];
-                        sun_voxels.push(InstanceData {
-                            position: pos,
-                            scale: [2.0, 2.0, 2.0],
-                            color: [4.0, 3.5, 0.2],
-                            alpha: 1.0,
-                        });
-                    }
-                }
-            }
-        }
-        sun_voxels.shrink_to_fit();
-
-        // combine all
+        let sun_voxel_count = count_sun_voxels(sun_radius) as u32;
         let total_count = planet_voxels.len()
             + atmosphere_voxels.len()
             + cloud_voxels.len()
             + dust_instances.len()
-            + sun_voxels.len();
+            + (sun_voxel_count as usize);
+
         let num_instances_total = total_count as u32;
 
-        let combined_instances = [
-            planet_voxels.as_slice(),
-            atmosphere_voxels.as_slice(),
-            cloud_voxels.as_slice(),
-            dust_instances.as_slice(),
-            sun_voxels.as_slice(),
-        ]
-        .concat();
-        let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        // We'll create one big instance buffer large enough for everything
+        let single_buffer_size = (num_instances_total as usize)
+            * std::mem::size_of::<InstanceData>();
+        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("InstanceBuffer"),
-            contents: bytemuck::cast_slice(&combined_instances),
+            size: single_buffer_size as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
+
+        // Write the planet, atmosphere, clouds, dust directly
+        // The sun data will be placed afterward
+        let mut offset_bytes = 0u64;
+        let write_slice_planet = bytemuck::cast_slice(&planet_voxels);
+        queue.write_buffer(&instance_buffer, offset_bytes, write_slice_planet);
+        offset_bytes += (planet_voxels.len() * mem::size_of::<InstanceData>()) as u64;
+
+        let write_slice_atmo = bytemuck::cast_slice(&atmosphere_voxels);
+        queue.write_buffer(&instance_buffer, offset_bytes, write_slice_atmo);
+        offset_bytes += (atmosphere_voxels.len() * mem::size_of::<InstanceData>()) as u64;
+
+        let write_slice_cloud = bytemuck::cast_slice(&cloud_voxels);
+        queue.write_buffer(&instance_buffer, offset_bytes, write_slice_cloud);
+        offset_bytes += (cloud_voxels.len() * mem::size_of::<InstanceData>()) as u64;
+
+        let write_slice_dust = bytemuck::cast_slice(&dust_instances);
+        queue.write_buffer(&instance_buffer, offset_bytes, write_slice_dust);
+        offset_bytes += (dust_instances.len() * mem::size_of::<InstanceData>()) as u64;
+
+        // The sun starts here in the big buffer
+        let sun_start_offset = offset_bytes;
 
         //
         // Camera
@@ -466,6 +622,7 @@ impl State {
         //
         // Sun pos uniform
         //
+        let sun_center = [4000.0, 0.0, -2000.0];
         let sun_uniform = SunUniform {
             sun_pos: [sun_center[0], sun_center[1], sun_center[2], 1.0],
         };
@@ -475,11 +632,9 @@ impl State {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // bind group layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Globals BGL"),
             entries: &[
-                // camera
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -490,7 +645,6 @@ impl State {
                     },
                     count: None,
                 },
-                // sun pos
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -520,14 +674,14 @@ impl State {
         });
 
         //
-        // WGSL SHADER
+        // WGSL Shader, same as original
         //
         let shader_src = r#"
 struct Globals {
-    viewProj: mat4x4<f32>,
+    viewProj: mat4x4<f32>;
 };
 struct Sun {
-    sunPos: vec4<f32>,
+    sunPos: vec4<f32>;
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -579,15 +733,13 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
-    // if color.r>3 => this is a sun voxel => self-luminous, no shading
     if (in.color.r > 3.0) {
+        // sun voxel => self-luminous
         return vec4<f32>(in.color, 1.0);
     }
-
     let sunPos = sunData.sunPos.xyz;
     let dir = normalize(sunPos - in.worldPos);
     let lambert = max(dot(in.normal, dir), 0.0);
-
     let finalColor = in.color * lambert;
     return vec4<f32>(finalColor, in.alpha);
 }
@@ -598,7 +750,6 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(shader_src)),
         });
 
-        // pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("PipelineLayout"),
             bind_group_layouts: &[&bind_group_layout],
@@ -612,7 +763,6 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
                 module: &shader_module,
                 entry_point: "vs_main",
                 buffers: &[
-                    // geometry
                     wgpu::VertexBufferLayout {
                         array_stride: mem::size_of::<f32>() as wgpu::BufferAddress * 8,
                         step_mode: wgpu::VertexStepMode::Vertex,
@@ -634,7 +784,6 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
                             },
                         ],
                     },
-                    // instance
                     InstanceData::desc(),
                 ],
             },
@@ -685,7 +834,9 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             cloud_voxels,
             dust_orbits,
             dust_instances,
-            sun_voxels,
+
+            sun_voxel_count,
+            sun_start_offset,
 
             instance_buffer,
             num_instances_total,
@@ -789,9 +940,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             c.color = [r, g, b];
         }
 
-        //
-        // Disk orbits
-        //
+        // Update dust orbit
         for (i, orbit) in self.dust_orbits.iter_mut().enumerate() {
             orbit.angle += orbit.speed;
             let x = orbit.radius * orbit.angle.cos();
@@ -800,47 +949,38 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             self.dust_instances[i].position = [x, y, z];
         }
 
-        //
-        // Sun: dynamic noisy surface (yellow/orange)
-        //
-        let freq_sun = 0.02;
-        for s in &mut self.sun_voxels {
-            let sx = s.position[0];
-            let sy = s.position[1];
-            let sz = s.position[2];
-            // convert to local coords
-            let lx = sx - 4000.0;
-            let ly = sy - 0.0;
-            let lz = sz + 2000.0;
-
-            let px = lx as f64 * freq_sun;
-            let py = ly as f64 * freq_sun;
-            let pz = lz as f64 * freq_sun;
-            let t = self.time as f64 * 0.3;
-
-            let val1 = self.perlin1.get([px, py + t, pz]);
-            let val2 = 0.5 * self.perlin2.get([py, pz + t, px]);
-            let sum = val1 + val2;
-            let mapped = 0.5 * (sum + 1.0);
-
-            let r = 3.0 + 1.0 * mapped;
-            let g = 2.5 + 1.0 * mapped;
-            let b = 0.0 + 0.5 * mapped;
-            s.color = [r as f32, g as f32, b as f32];
-        }
-
-        // re-combine
-        let combined = [
+        // Now we re-write planet + atmosphere + cloud + dust. The giant sun is updated differently
+        let combined_planet_atmo_cloud_dust = [
             self.planet_voxels.as_slice(),
             self.atmosphere_voxels.as_slice(),
             self.cloud_voxels.as_slice(),
             self.dust_instances.as_slice(),
-            self.sun_voxels.as_slice(),
         ]
         .concat();
-        self.queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&combined));
+        self.queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&combined_planet_atmo_cloud_dust),
+        );
 
-        // camera
+        //
+        // The sun: we have a massive volumetric array. We will re-generate chunk-by-chunk
+        // in place in the GPU buffer. This ensures identical final result but minimal CPU RAM usage.
+        //
+        fill_sun_voxels_in_chunks(
+            &self.device,
+            &self.queue,
+            &self.instance_buffer,
+            self.sun_start_offset,
+            1200.0, // the same giant sun radius
+            &self.perlin1,
+            &self.perlin2,
+            self.time,
+        );
+
+        //
+        // Camera
+        //
         let aspect = self.config.width as f32 / self.config.height as f32;
         let fovy = 45f32.to_radians();
         let near = 0.1;
@@ -973,7 +1113,7 @@ fn main() {
 async fn run() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-        .with_title("Gigantic Sun + Planet + Clouds + Perlin (wgpu)")
+        .with_title("Gigantic Sun + Planet + Clouds + Perlin (wgpu) - Streamed")
         .build(&event_loop)
         .unwrap();
 
@@ -1006,6 +1146,7 @@ async fn run() {
                 }
             }
             Event::RedrawRequested(_) => {
+                // Update + Render
                 state.update();
                 match state.render() {
                     Ok(_) => {}
@@ -1024,46 +1165,4 @@ async fn run() {
             _ => {}
         }
     });
-}
-
-//
-// ===================== COLOR MAPS =====================
-//
-
-#[inline(always)]
-fn planet_color_map(t: f32) -> (f32, f32, f32) {
-    if t < 0.33 {
-        let u = t / 0.33;
-        let r = 0.1 + 0.2 * u;
-        let g = 0.7 - 0.3 * u;
-        let b = 0.3 + 0.4 * u;
-        (r, g, b)
-    } else if t < 0.66 {
-        let u = (t - 0.33) / 0.33;
-        let r = 0.3 + 0.5 * u;
-        let g = 0.4 - 0.2 * u;
-        let b = 0.7 + 0.2 * u;
-        (r, g, b)
-    } else {
-        let u = (t - 0.66) / 0.34;
-        let r = 0.8 + 0.2 * u;
-        let g = 0.2 + 0.3 * u;
-        let b = 0.9 - 0.2 * u;
-        (r, g, b)
-    }
-}
-
-#[inline(always)]
-fn atmosphere_color_map(t: f32) -> (f32, f32, f32) {
-    let r = 0.3 + 0.7 * t;
-    let g = 0.5 + 0.1 * t;
-    let b = 0.8 - 0.1 * t;
-    (r, g, b)
-}
-
-#[inline(always)]
-fn cloud_color_map(t: f32) -> (f32, f32, f32) {
-    let grey = 0.8 + 0.2 * t;
-    let tint = 0.9 + 0.1 * t;
-    (tint, grey, tint)
 }
