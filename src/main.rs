@@ -598,7 +598,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
 }
 "#;
 
-        let shader_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("SunPointShader"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(shader_src)),
         });
