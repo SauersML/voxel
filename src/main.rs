@@ -1,5 +1,4 @@
 use std::iter;
-use std::mem;
 
 use wgpu::util::DeviceExt;
 use winit::{
@@ -9,7 +8,7 @@ use winit::{
     window::WindowBuilder,
 };
 
-use glam::{Mat4, Vec3, Vec4};
+use glam::{Mat4, Vec3};
 use rand::Rng;
 use noise::{NoiseFn, Perlin};
 
@@ -374,7 +373,7 @@ impl SunManager {
     }
 
     // draw all chunks
-    fn draw_all(&self, rp: &mut wgpu::RenderPass<'_>, index_count: u32) {
+    fn draw_all<'a>(&'a self, rp: &mut wgpu::RenderPass<'a>, index_count: u32) {
         for chunk in &self.chunks {
             rp.set_vertex_buffer(1, chunk.buffer.slice(..));
             rp.draw_indexed(0..index_count, 0, 0..chunk.count);
