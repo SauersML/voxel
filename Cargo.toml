@@ -9,3 +9,5 @@ winit = "0.28"
 pollster = "0.3"
 glam = "0.26"
 rand = "0.8"
+bytemuck = { version = "1.14.0", features = ["derive"] }
+env_logger = "0.10.1"
