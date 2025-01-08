@@ -850,7 +850,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
     return vec4<f32>(finalColor, in.alpha);
 }
 "#;
-        let shader_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("SunShader"),
             source: wgpu::ShaderSource::Wgsl(shader_src.into()),
         });
