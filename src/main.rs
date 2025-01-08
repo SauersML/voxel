@@ -14,47 +14,51 @@ use rand::Rng;
 use noise::{NoiseFn, Perlin};
 
 //
-// ========================= CUBE GEOMETRY =========================
+// ======================== CUBE GEOMETRY ========================
+//
+// We'll reuse the same cube geometry for planet voxels,
+// atmosphere voxels, cloud voxels, and disk-like particles.
+// The disk-likes are just squashed via non-uniform scale.
 //
 
 #[rustfmt::skip]
 const VERTICES: &[f32] = &[
-    // position         normal           uv
+    // pos (x,y,z), normal (nx,ny,nz), uv (u,v)
     // +X
-    0.5,  0.5, -0.5,   1.0,  0.0,  0.0,  1.0, 0.0,
-    0.5, -0.5, -0.5,   1.0,  0.0,  0.0,  0.0, 0.0,
-    0.5, -0.5,  0.5,   1.0,  0.0,  0.0,  0.0, 1.0,
-    0.5,  0.5,  0.5,   1.0,  0.0,  0.0,  1.0, 1.0,
+    0.5,  0.5, -0.5,    1.0,  0.0,  0.0,    1.0, 0.0,
+    0.5, -0.5, -0.5,    1.0,  0.0,  0.0,    0.0, 0.0,
+    0.5, -0.5,  0.5,    1.0,  0.0,  0.0,    0.0, 1.0,
+    0.5,  0.5,  0.5,    1.0,  0.0,  0.0,    1.0, 1.0,
 
     // -X
-   -0.5,  0.5,  0.5,  -1.0,  0.0,  0.0,  1.0, 0.0,
-   -0.5, -0.5,  0.5,  -1.0,  0.0,  0.0,  0.0, 0.0,
-   -0.5, -0.5, -0.5,  -1.0,  0.0,  0.0,  0.0, 1.0,
-   -0.5,  0.5, -0.5,  -1.0,  0.0,  0.0,  1.0, 1.0,
+   -0.5,  0.5,  0.5,   -1.0,  0.0,  0.0,    1.0, 0.0,
+   -0.5, -0.5,  0.5,   -1.0,  0.0,  0.0,    0.0, 0.0,
+   -0.5, -0.5, -0.5,   -1.0,  0.0,  0.0,    0.0, 1.0,
+   -0.5,  0.5, -0.5,   -1.0,  0.0,  0.0,    1.0, 1.0,
 
     // +Y
-   -0.5,  0.5,  0.5,   0.0,  1.0,  0.0,  1.0, 0.0,
-   -0.5,  0.5, -0.5,   0.0,  1.0,  0.0,  0.0, 0.0,
-    0.5,  0.5, -0.5,   0.0,  1.0,  0.0,  0.0, 1.0,
-    0.5,  0.5,  0.5,   0.0,  1.0,  0.0,  1.0, 1.0,
+   -0.5,  0.5,  0.5,    0.0,  1.0,  0.0,    1.0, 0.0,
+   -0.5,  0.5, -0.5,    0.0,  1.0,  0.0,    0.0, 0.0,
+    0.5,  0.5, -0.5,    0.0,  1.0,  0.0,    0.0, 1.0,
+    0.5,  0.5,  0.5,    0.0,  1.0,  0.0,    1.0, 1.0,
 
     // -Y
-    0.5, -0.5,  0.5,   0.0, -1.0,  0.0,  1.0, 0.0,
-    0.5, -0.5, -0.5,   0.0, -1.0,  0.0,  0.0, 0.0,
-   -0.5, -0.5, -0.5,   0.0, -1.0,  0.0,  0.0, 1.0,
-   -0.5, -0.5,  0.5,   0.0, -1.0,  0.0,  1.0, 1.0,
+    0.5, -0.5,  0.5,    0.0, -1.0,  0.0,    1.0, 0.0,
+    0.5, -0.5, -0.5,    0.0, -1.0,  0.0,    0.0, 0.0,
+   -0.5, -0.5, -0.5,    0.0, -1.0,  0.0,    0.0, 1.0,
+   -0.5, -0.5,  0.5,    0.0, -1.0,  0.0,    1.0, 1.0,
 
     // +Z
-    0.5,  0.5,  0.5,   0.0,  0.0,  1.0,  1.0, 0.0,
-    0.5, -0.5,  0.5,   0.0,  0.0,  1.0,  0.0, 0.0,
-   -0.5, -0.5,  0.5,   0.0,  0.0,  1.0,  0.0, 1.0,
-   -0.5,  0.5,  0.5,   0.0,  0.0,  1.0,  1.0, 1.0,
+    0.5,  0.5,  0.5,    0.0,  0.0,  1.0,    1.0, 0.0,
+    0.5, -0.5,  0.5,    0.0,  0.0,  1.0,    0.0, 0.0,
+   -0.5, -0.5,  0.5,    0.0,  0.0,  1.0,    0.0, 1.0,
+   -0.5,  0.5,  0.5,    0.0,  0.0,  1.0,    1.0, 1.0,
 
     // -Z
-   -0.5,  0.5, -0.5,   0.0,  0.0, -1.0,  1.0, 0.0,
-   -0.5, -0.5, -0.5,   0.0,  0.0, -1.0,  0.0, 0.0,
-    0.5, -0.5, -0.5,   0.0,  0.0, -1.0,  0.0, 1.0,
-    0.5,  0.5, -0.5,   0.0,  0.0, -1.0,  1.0, 1.0,
+   -0.5,  0.5, -0.5,    0.0,  0.0, -1.0,    1.0, 0.0,
+   -0.5, -0.5, -0.5,    0.0,  0.0, -1.0,    0.0, 0.0,
+    0.5, -0.5, -0.5,    0.0,  0.0, -1.0,    0.0, 1.0,
+    0.5,  0.5, -0.5,    0.0,  0.0, -1.0,    1.0, 1.0,
 ];
 
 #[rustfmt::skip]
@@ -68,14 +72,15 @@ const INDICES: &[u16] = &[
 ];
 
 //
-// ========================= INSTANCE DATA =========================
+// =============== INSTANCE DATA: position, scale3, color, alpha ===============
 //
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceData {
     position: [f32; 3],
-    scale: f32,
+    // Non-uniform scale for disk-likes => scale3 instead of single float
+    scale: [f32; 3],
     color: [f32; 3],
     alpha: f32,
 }
@@ -97,17 +102,17 @@ impl InstanceData {
                 wgpu::VertexAttribute {
                     offset: (4 * 3) as wgpu::BufferAddress,
                     shader_location: 6,
-                    format: wgpu::VertexFormat::Float32,
+                    format: wgpu::VertexFormat::Float32x3,
                 },
                 // color
                 wgpu::VertexAttribute {
-                    offset: (4 * 4) as wgpu::BufferAddress,
+                    offset: (4 * 6) as wgpu::BufferAddress,
                     shader_location: 7,
                     format: wgpu::VertexFormat::Float32x3,
                 },
                 // alpha
                 wgpu::VertexAttribute {
-                    offset: (4 * 7) as wgpu::BufferAddress,
+                    offset: (4 * 9) as wgpu::BufferAddress,
                     shader_location: 8,
                     format: wgpu::VertexFormat::Float32,
                 },
@@ -117,7 +122,7 @@ impl InstanceData {
 }
 
 //
-// ========================= CAMERA UNIFORM =========================
+// ====================== CAMERA UNIFORM ======================
 //
 
 #[repr(C)]
@@ -127,24 +132,23 @@ struct CameraUniform {
 }
 
 //
-// ========================= CUSTOM ORBITING DUST DATA =========================
+// ========== Orbit Info for Disk Particles ==========
 //
 
-/// For each dust particle, we store its orbit radius, speed, and current angle.
 #[derive(Clone, Copy)]
 struct DustOrbit {
     radius: f32,
     angle: f32,
     speed: f32,
-    height: f32, // how high above the origin it orbits
+    height: f32,
 }
 
 //
-// ========================= APP STATE =========================
+// ====================== APP STATE ======================
 //
 
 struct State {
-    // WGPU + Window
+    // WGPU
     surface: wgpu::Surface,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -161,35 +165,40 @@ struct State {
     num_indices: u32,
 
     // Instances
-    sphere_instances: Vec<InstanceData>,
-    dust_orbits: Vec<DustOrbit>, // separate CPU data for dust orbiting
+    planet_voxels: Vec<InstanceData>,
+    atmosphere_voxels: Vec<InstanceData>,
+    cloud_voxels: Vec<InstanceData>,
+
+    dust_orbits: Vec<DustOrbit>,
     dust_instances: Vec<InstanceData>,
+
     instance_buffer: wgpu::Buffer,
     num_instances_total: u32,
 
-    // Perlin noise for color
-    perlin: Perlin,
+    // Noise
+    perlin1: Perlin, 
+    perlin2: Perlin,
 
     // Camera
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
 
-    // Animation
     time: f32,
 
-    // Camera controls
-    camera_yaw: f32,   // horizontal rotation
-    camera_pitch: f32, // vertical rotation
-    camera_dist: f32,  // distance from center
+    // Camera orbit
+    camera_yaw: f32,
+    camera_pitch: f32,
+    camera_dist: f32,
 
+    // Mouse state
     last_mouse_pos: Option<(f64, f64)>,
     mouse_pressed: bool,
 }
 
 impl State {
     async fn new(window: &winit::window::Window) -> Self {
-        // Setup instance + surface + adapter
+        // Instance + surface + adapter
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = unsafe { instance.create_surface(window) }.unwrap();
@@ -200,7 +209,7 @@ impl State {
                 force_fallback_adapter: false,
             })
             .await
-            .expect("Failed to find GPU adapter!");
+            .expect("No GPU adapter found!");
 
         // Device + queue
         let (device, queue) = adapter
@@ -217,10 +226,10 @@ impl State {
 
         // Surface config
         let surface_caps = surface.get_capabilities(&adapter);
-        let surface_format = surface_caps.formats[0];
+        let format = surface_caps.formats[0];
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
+            format,
             width: size.width,
             height: size.height,
             present_mode: surface_caps.present_modes[0],
@@ -229,9 +238,9 @@ impl State {
         };
         surface.configure(&device, &config);
 
-        // Depth texture
+        // Depth
         let depth_texture_desc = &wgpu::TextureDescriptor {
-            label: Some("DepthTexture"),
+            label: Some("Depth Texture"),
             size: wgpu::Extent3d {
                 width: config.width,
                 height: config.height,
@@ -247,7 +256,7 @@ impl State {
         let depth_texture = device.create_texture(depth_texture_desc);
         let depth_texture_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Buffers for geometry
+        // Cube buffers
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cube Vertex Buffer"),
             contents: bytemuck::cast_slice(VERTICES),
@@ -260,29 +269,23 @@ impl State {
         });
         let num_indices = INDICES.len() as u32;
 
-        //
-        // Build main voxel sphere
-        //
-        let mut sphere_instances = Vec::new();
-        let mut rng = rand::thread_rng();
+        // Build planet
+        let mut planet_voxels = Vec::new();
         let radius = 12.0;
-        // We’ll do a 32^3 region, check distance from center
-        // We'll sample Perlin to pick color in patches
+        let mut rng = rand::thread_rng();
         for x in -16..16 {
             for y in -16..16 {
                 for z in -16..16 {
                     let fx = x as f32 + 0.5;
                     let fy = y as f32 + 0.5;
                     let fz = z as f32 + 0.5;
-                    let dist = (fx*fx + fy*fy + fz*fz).sqrt();
-                    let noise = rng.gen_range(0.0..2.0);
+                    let dist = (fx * fx + fy * fy + fz * fz).sqrt();
+                    let noise = rng.gen_range(0.0..2.0); 
                     if dist < radius + noise {
-                        // We'll fill real color from Perlin later in update() to make it shift
-                        let placeholder_color = [0.5, 0.5, 0.5];
-                        sphere_instances.push(InstanceData {
+                        planet_voxels.push(InstanceData {
                             position: [fx, fy, fz],
-                            scale: 1.0,
-                            color: placeholder_color,
+                            scale: [1.0, 1.0, 1.0],
+                            color: [0.5, 0.5, 0.5],
                             alpha: 1.0,
                         });
                     }
@@ -290,46 +293,104 @@ impl State {
             }
         }
 
-        //
-        // Build orbiting dust
-        //
-        // Instead of random position, we store orbit info (radius, speed, angle).
-        // We'll update them each frame and fill into "dust_instances".
+        // Build atmosphere (slightly larger sphere with partial alpha)
+        // We'll just do a second shell of voxels ~ 1.05x bigger radius
+        let mut atmosphere_voxels = Vec::new();
+        let atmosphere_factor = 1.05; 
+        for voxel in &planet_voxels {
+            let dist = (voxel.position[0]*voxel.position[0] +
+                        voxel.position[1]*voxel.position[1] +
+                        voxel.position[2]*voxel.position[2]).sqrt();
+            if dist > radius - 1.0 {
+                // near the "surface"
+                let scale = [1.0, 1.0, 1.0];
+                // Just offset outward slightly
+                let outward = 1.0 + (atmosphere_factor - 1.0);
+                let pos = [
+                    voxel.position[0] * outward / dist.max(0.0001),
+                    voxel.position[1] * outward / dist.max(0.0001),
+                    voxel.position[2] * outward / dist.max(0.0001),
+                ];
+                atmosphere_voxels.push(InstanceData {
+                    position: pos,
+                    scale,
+                    color: [0.3, 0.5, 0.8],
+                    alpha: 0.2,
+                });
+            }
+        }
+
+        // Build clouds (a second shell even bigger, partial alpha)
+        // We'll do ~1.1 radius and sparser
+        let mut cloud_voxels = Vec::new();
+        let cloud_factor = 1.1;
+        for voxel in &planet_voxels {
+            let dist = (voxel.position[0]*voxel.position[0] +
+                        voxel.position[1]*voxel.position[1] +
+                        voxel.position[2]*voxel.position[2]).sqrt();
+            if dist > radius - 1.0 && rng.gen_bool(0.3) {
+                let outward = cloud_factor;
+                let pos = [
+                    voxel.position[0] * outward / dist.max(0.0001),
+                    voxel.position[1] * outward / dist.max(0.0001),
+                    voxel.position[2] * outward / dist.max(0.0001),
+                ];
+                cloud_voxels.push(InstanceData {
+                    position: pos,
+                    scale: [1.0, 1.0, 1.0],
+                    color: [1.0, 1.0, 1.0],
+                    alpha: 0.15,
+                });
+            }
+        }
+
+        // Disk-like particles
+        // We'll store orbits and update them each frame
         let mut dust_orbits = Vec::new();
         let mut dust_instances = Vec::new();
         for _ in 0..300 {
-            let orbit_radius = rng.gen_range(15.0..35.0);
-            let speed = rng.gen_range(0.005..0.02); // vary speed
+            let r = rng.gen_range(15.0..40.0);   // bigger than planet radius
             let angle = rng.gen_range(0.0..std::f32::consts::TAU);
-            let height = rng.gen_range(-5.0..15.0);
+            let speed = rng.gen_range(0.005..0.02);
+            let height = rng.gen_range(-6.0..6.0);
 
             dust_orbits.push(DustOrbit {
-                radius: orbit_radius,
+                radius: r,
                 angle,
                 speed,
                 height,
             });
-            // placeholder instance
+            // The actual instance: flattened scale in Y => disk-like
             dust_instances.push(InstanceData {
                 position: [0.0, 0.0, 0.0],
-                scale: 0.2,
+                scale: [0.2, 0.02, 0.2],
                 color: [1.0, 1.0, 1.0],
-                alpha: 0.15,
+                alpha: 0.2,
             });
         }
 
-        // Combined instance buffer
-        let num_instances_total = (sphere_instances.len() + dust_instances.len()) as u32;
-        let combined = [sphere_instances.as_slice(), dust_instances.as_slice()].concat();
+        // Combine everything into one big instance buffer
+        let total_count = planet_voxels.len() 
+                        + atmosphere_voxels.len() 
+                        + cloud_voxels.len() 
+                        + dust_instances.len();
+        let num_instances_total = total_count as u32;
+
+        let combined_data = [
+            planet_voxels.as_slice(),
+            atmosphere_voxels.as_slice(),
+            cloud_voxels.as_slice(),
+            dust_instances.as_slice(),
+        ]
+        .concat();
+
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&combined),
+            contents: bytemuck::cast_slice(&combined_data),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        //
         // Camera
-        //
         let camera_uniform = CameraUniform {
             view_proj: Mat4::IDENTITY.to_cols_array(),
         };
@@ -338,53 +399,46 @@ impl State {
             contents: bytemuck::cast_slice(&camera_uniform.view_proj),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Camera BGL"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+        let camera_bg_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Camera BG Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                ],
-            });
+                    count: None,
+                },
+            ],
+        });
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Camera BG"),
-            layout: &camera_bind_group_layout,
+            layout: &camera_bg_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: camera_buffer.as_entire_binding(),
             }],
         });
 
-        //
         // Shader
-        //
-        // We’ll do simpler Lambert shading with two directional lights + small ambient.
-        // No rim light. Reduced brightness for more subtle shading.
-        //
-        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Voxel Shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
-                r#"
-@group(0) @binding(0) 
+        // We'll simulate a single "sun" far off in one direction: (1.0, 0.7, 0.2)
+        // with warm color. Also small ambient. This effectively "bathes" everything in warm light.
+        let shader_src = r#"
+@group(0) @binding(0)
 var<uniform> viewProj: mat4x4<f32>;
 
 struct Instance {
     @location(5) pos: vec3<f32>,
-    @location(6) scale: f32,
+    @location(6) scale: vec3<f32>,
     @location(7) color: vec3<f32>,
     @location(8) alpha: f32,
 };
 
-struct VSOut {
-    @builtin(position) clip_position: vec4<f32>,
+struct VSOutput {
+    @builtin(position) position: vec4<f32>,
     @location(0) normal: vec3<f32>,
     @location(1) color: vec3<f32>,
     @location(2) alpha: f32,
@@ -394,60 +448,61 @@ struct VSOut {
 fn vs_main(
     @location(0) inPos: vec3<f32>,
     @location(1) inNormal: vec3<f32>,
-    @location(2) inUV: vec2<f32>,
+    @location(2) _uv: vec2<f32>,
     inst: Instance
-) -> VSOut {
-    var out: VSOut;
-    let worldPos = inPos * inst.scale + inst.pos;
-    out.clip_position = viewProj * vec4<f32>(worldPos, 1.0);
-    out.normal = normalize(inNormal); // scale is uniform, so no real distortion
+) -> VSOutput {
+    var out: VSOutput;
+    // Apply non-uniform scale
+    let scaledPos = vec3<f32>(inPos.x * inst.scale.x,
+                              inPos.y * inst.scale.y,
+                              inPos.z * inst.scale.z);
+    let worldPos = scaledPos + inst.pos;
+    out.position = viewProj * vec4<f32>(worldPos, 1.0);
+
+    // The normal, also scaled. We'll just do approximate approach:
+    // for small flattening, it should be fine to do normal = inNormal / scale
+    let scaleFix = vec3<f32>(1.0/inst.scale.x, 1.0/inst.scale.y, 1.0/inst.scale.z);
+    out.normal = normalize(inNormal * scaleFix);
     out.color = inst.color;
     out.alpha = inst.alpha;
     return out;
 }
 
 @fragment
-fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
+fn fs_main(input: VSOutput) -> @location(0) vec4<f32> {
     let n = normalize(input.normal);
 
-    // Two directional lights
-    let lightDir1 = normalize(vec3<f32>(0.2, 1.0, 0.3));
-    let lightDir2 = normalize(vec3<f32>(-0.4, 0.7, -0.2));
-    let color1    = vec3<f32>(1.0, 0.95, 0.9);
-    let color2    = vec3<f32>(0.6, 0.7, 1.0);
-
+    // "Sun" direction & color
+    let sunDir = normalize(vec3<f32>(1.0, 0.7, 0.2));
+    let sunColor = vec3<f32>(1.0, 0.9, 0.7) * 1.5;
     // Lambert
-    let d1 = max(dot(n, lightDir1), 0.0);
-    let d2 = max(dot(n, lightDir2), 0.0);
-
-    // minimal ambient
-    let ambient = 0.15;
-
-    let finalColor = input.color * (ambient + 0.5*d1*color1 + 0.5*d2*color2);
-
+    let lambert = max(dot(n, sunDir), 0.0);
+    // small ambient
+    let ambient = 0.2;
+    let finalColor = input.color * (ambient + lambert * sunColor);
     return vec4<f32>(finalColor, input.alpha);
 }
-"#
-            )),
+"#;
+
+        let shader_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+            label: Some("Sun Shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(shader_src)),
         });
 
-        //
         // Pipeline
-        //
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Pipeline Layout"),
-            bind_group_layouts: &[&camera_bind_group_layout],
+            label: Some("Render Pipeline Layout"),
+            bind_group_layouts: &[&camera_bg_layout],
             push_constant_ranges: &[],
         });
-
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
+            label: Some("Pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader_module,
                 entry_point: "vs_main",
                 buffers: &[
-                    // Cube geometry
+                    // geometry
                     wgpu::VertexBufferLayout {
                         array_stride: mem::size_of::<f32>() as wgpu::BufferAddress * 8,
                         step_mode: wgpu::VertexStepMode::Vertex,
@@ -472,7 +527,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
                             },
                         ],
                     },
-                    // Instance data
+                    // instance data
                     InstanceData::desc(),
                 ],
             },
@@ -480,7 +535,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
                 module: &shader_module,
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
+                    format,
                     blend: Some(wgpu::BlendState {
                         color: wgpu::BlendComponent::OVER,
                         alpha: wgpu::BlendComponent::OVER,
@@ -490,8 +545,8 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: Some(wgpu::Face::Back),
                 front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
                 polygon_mode: wgpu::PolygonMode::Fill,
                 strip_index_format: None,
                 unclipped_depth: false,
@@ -512,7 +567,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
             multiview: None,
         });
 
-        // Final
+        // Construct State
         Self {
             surface,
             device,
@@ -521,17 +576,25 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
             size,
             render_pipeline,
             depth_texture_view,
+
             vertex_buffer,
             index_buffer,
             num_indices,
 
-            sphere_instances,
+            planet_voxels,
+            atmosphere_voxels,
+            cloud_voxels,
+
             dust_orbits,
             dust_instances,
-            instance_buffer,
-            num_instances_total,
 
-            perlin: Perlin::new(1),
+            instance_buffer,
+            num_instances_total: num_instances_total,
+
+            // Two Perlin generators for "superposition" in color (optional usage)
+            perlin1: Perlin::new(1),
+            perlin2: Perlin::new(2),
+
             camera_uniform,
             camera_buffer,
             camera_bind_group,
@@ -547,7 +610,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
         }
     }
 
-    /// Resize
+    // Resize
     fn resize(&mut self, new_size: PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
@@ -555,8 +618,9 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
 
-            let depth_texture_desc = &wgpu::TextureDescriptor {
-                label: Some("DepthTexture"),
+            // Recreate depth
+            let depth_desc = wgpu::TextureDescriptor {
+                label: Some("Depth Tex"),
                 size: wgpu::Extent3d {
                     width: new_size.width,
                     height: new_size.height,
@@ -569,33 +633,63 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
             };
-            let depth_texture = self.device.create_texture(depth_texture_desc);
+            let depth_texture = self.device.create_texture(&depth_desc);
             self.depth_texture_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
         }
     }
 
-    /// Update every frame
+    // update
     fn update(&mut self) {
         self.time += 0.01;
 
-        // 1) Update sphere color with Perlin noise that shifts over time
-        // We sample noise in [x, y, z, time], then map to color
-        let freq = 0.06; // scale of noise
-        for inst in &mut self.sphere_instances {
-            let x = inst.position[0] as f64 * freq;
-            let y = inst.position[1] as f64 * freq;
-            let z = inst.position[2] as f64 * freq;
-            let t = self.time as f64 * 0.3; // shift over time
-            // sample in 4D: (x, y, z+ t)
-            let val = self.perlin.get([x, y, z + t]);
-            // val in [-1..1], map to [0..1]
-            let normalized = 0.5 * (val + 1.0);
-            // We'll pick a color in e.g. green-blue-pinkish range
-            let (r, g, b) = perlin_color_map(normalized as f32);
-            inst.color = [r, g, b];
+        // Update planet color with superposition of perlin1 & perlin2
+        // Also update atmosphere & clouds for "dynamic" effect
+        let freq = 0.06;
+        let freq_cloud = 0.03;
+        let freq_atmo = 0.04;
+
+        // Planet
+        for v in &mut self.planet_voxels {
+            let x = v.position[0] as f64 * freq;
+            let y = v.position[1] as f64 * freq;
+            let z = v.position[2] as f64 * freq;
+            let t = self.time as f64 * 0.2;
+
+            let val1 = self.perlin1.get([x, y, z + t]);
+            let val2 = 0.5 * self.perlin2.get([z, x, y + t * 1.5]);
+            let sum = val1 + val2;  // superposition
+            let nval = 0.5*(sum + 1.0); // map [-1..1] to [0..1]
+            let (r, g, b) = perlin_color_map(nval as f32);
+            v.color = [r, g, b];
         }
 
-        // 2) Update dust orbit
+        // Atmosphere
+        for a in &mut self.atmosphere_voxels {
+            let x = a.position[0] as f64 * freq_atmo;
+            let y = a.position[1] as f64 * freq_atmo;
+            let z = a.position[2] as f64 * freq_atmo;
+            let t = self.time as f64 * 0.3;
+            let val = self.perlin1.get([x, y, z + t]);
+            let nval = 0.5*(val + 1.0);
+            // from light blue to pinkish
+            let (r, g, b) = atmosphere_color_map(nval as f32);
+            a.color = [r, g, b];
+        }
+
+        // Clouds
+        for c in &mut self.cloud_voxels {
+            let x = c.position[0] as f64 * freq_cloud;
+            let y = c.position[1] as f64 * freq_cloud;
+            let z = c.position[2] as f64 * freq_cloud;
+            let t = self.time as f64 * 0.4;
+            let val = self.perlin2.get([x + t, y, z]);
+            let nval = 0.5*(val + 1.0);
+            // near white, but maybe tinted
+            let (r, g, b) = cloud_color_map(nval as f32);
+            c.color = [r, g, b];
+        }
+
+        // Update dust orbits
         for (i, orbit) in self.dust_orbits.iter_mut().enumerate() {
             orbit.angle += orbit.speed;
             let x = orbit.radius * orbit.angle.cos();
@@ -604,46 +698,39 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
             self.dust_instances[i].position = [x, y, z];
         }
 
-        // 3) Combine into single instance buffer
+        // Re-combine into single buffer
         let combined = [
-            self.sphere_instances.as_slice(),
+            self.planet_voxels.as_slice(),
+            self.atmosphere_voxels.as_slice(),
+            self.cloud_voxels.as_slice(),
             self.dust_instances.as_slice(),
         ]
         .concat();
-        self.queue.write_buffer(
-            &self.instance_buffer,
-            0,
-            bytemuck::cast_slice(&combined),
-        );
+        self.queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&combined));
 
-        // 4) Recompute camera
+        // Recompute camera
         let aspect = self.config.width as f32 / self.config.height as f32;
         let fovy = 45f32.to_radians();
         let near = 0.1;
         let far = 2000.0;
 
-        // Convert yaw/pitch/dist to eye pos
         let eye_x = self.camera_dist * self.camera_yaw.cos() * self.camera_pitch.cos();
         let eye_y = self.camera_dist * self.camera_pitch.sin();
         let eye_z = self.camera_dist * self.camera_yaw.sin() * self.camera_pitch.cos();
         let eye = Vec3::new(eye_x, eye_y, eye_z);
-
         let center = Vec3::ZERO;
         let up = Vec3::Y;
 
         let view = Mat4::look_at_rh(eye, center, up);
         let proj = Mat4::perspective_rh(fovy, aspect, near, far);
-        let view_proj = proj * view;
+        let vp = proj * view;
 
-        self.camera_uniform.view_proj = view_proj.to_cols_array();
-        self.queue.write_buffer(
-            &self.camera_buffer,
-            0,
-            bytemuck::cast_slice(&self.camera_uniform.view_proj),
-        );
+        self.camera_uniform.view_proj = vp.to_cols_array();
+        self.queue
+            .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&self.camera_uniform.view_proj));
     }
 
-    /// Render a frame
+    // render
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let frame = self.surface.get_current_texture()?;
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -661,11 +748,10 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        // Slightly dark background
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.01,
-                            g: 0.01,
-                            b: 0.02,
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.01,
                             a: 1.0,
                         }),
                         store: true,
@@ -685,7 +771,6 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
             rp.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             rp.set_vertex_buffer(1, self.instance_buffer.slice(..));
             rp.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-
             rp.draw_indexed(0..self.num_indices, 0, 0..self.num_instances_total);
         }
 
@@ -694,49 +779,44 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
         Ok(())
     }
 
-    /// Handle input events
+    // Handle user input (mouse drag => orbit, scroll => zoom)
     fn input(&mut self, event: &WindowEvent) -> bool {
         match event {
-            // Mouse press
             WindowEvent::MouseInput { state, button, .. } => {
                 if *button == MouseButton::Left {
                     self.mouse_pressed = *state == ElementState::Pressed;
                 }
-                false
+                true
             }
-            // Mouse move
             WindowEvent::CursorMoved { position, .. } => {
                 if self.mouse_pressed {
-                    // Drag => rotate
                     let (x, y) = (position.x, position.y);
-                    if let Some((last_x, last_y)) = self.last_mouse_pos {
-                        let dx = (x - last_x) as f32 * 0.005;
-                        let dy = (y - last_y) as f32 * 0.005;
+                    if let Some((lx, ly)) = self.last_mouse_pos {
+                        let dx = (x - lx) as f32 * 0.005;
+                        let dy = (y - ly) as f32 * 0.005;
                         self.camera_yaw += dx;
                         self.camera_pitch -= dy;
-                        // clamp pitch
-                        self.camera_pitch = self.camera_pitch.clamp(-1.5, 1.5);
+                        self.camera_pitch = self.camera_pitch.clamp(-1.4, 1.4);
                     }
                     self.last_mouse_pos = Some((x, y));
                 } else {
                     self.last_mouse_pos = Some((position.x, position.y));
                 }
-                false
+                true
             }
-            // Scroll => zoom
             WindowEvent::MouseWheel { delta, .. } => {
                 let scroll = match delta {
-                    MouseScrollDelta::LineDelta(_, scroll) => *scroll,
+                    MouseScrollDelta::LineDelta(_, s) => *s,
                     MouseScrollDelta::PixelDelta(px) => px.y as f32 / 60.0,
                 };
                 self.camera_dist -= scroll * 2.0;
-                if self.camera_dist < 10.0 {
-                    self.camera_dist = 10.0;
+                if self.camera_dist < 5.0 { 
+                    self.camera_dist = 5.0;
                 }
-                if self.camera_dist > 300.0 {
-                    self.camera_dist = 300.0;
+                if self.camera_dist > 500.0 {
+                    self.camera_dist = 500.0;
                 }
-                false
+                true
             }
             _ => false,
         }
@@ -744,7 +824,7 @@ fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
 }
 
 //
-// ========================= MAIN ENTRY =========================
+// ================= MAIN + EVENT LOOP =================
 //
 
 fn main() {
@@ -755,7 +835,7 @@ fn main() {
 async fn run() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-        .with_title("Noisy Sphere + Perlin Color + Orbiting Dust (wgpu)")
+        .with_title("Gigantic Sun + Planet + Disk Formation (wgpu)")
         .build(&event_loop)
         .unwrap();
 
@@ -763,10 +843,7 @@ async fn run() {
 
     event_loop.run(move |event, _, control_flow| {
         match &event {
-            Event::WindowEvent {
-                ref event,
-                window_id,
-            } if *window_id == window.id() => {
+            Event::WindowEvent { event, window_id } if *window_id == window.id() => {
                 match event {
                     WindowEvent::CloseRequested
                     | WindowEvent::KeyboardInput {
@@ -782,16 +859,12 @@ async fn run() {
                     WindowEvent::Resized(physical_size) => {
                         state.resize(*physical_size);
                     }
-
                     WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
                         state.resize(**new_inner_size);
                     }
-
-                    // Handle mouse/pan input
                     _ => {
-                        if state.input(event) {
-                            // handled
-                        }
+                        // Mouse / Scroll
+                        state.input(event);
                     }
                 }
             }
@@ -799,9 +872,13 @@ async fn run() {
                 state.update();
                 match state.render() {
                     Ok(_) => {}
-                    Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
-                    Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                    Err(e) => eprintln!("render error: {:?}", e),
+                    Err(wgpu::SurfaceError::Lost) => {
+                        state.resize(state.size);
+                    }
+                    Err(wgpu::SurfaceError::OutOfMemory) => {
+                        *control_flow = ControlFlow::Exit;
+                    }
+                    Err(e) => eprintln!("Render error: {:?}", e),
                 }
             }
             Event::MainEventsCleared => {
@@ -813,31 +890,49 @@ async fn run() {
 }
 
 //
-// ========================= COLOR MAPPING =========================
+// ================= COLOR MAPS FOR PLANET, ATMOSPHERE, CLOUDS =================
 //
 
-/// Map a single float in [0..1] to some "cool" color range for the sphere.
+/// Basic planet color mapping: maps [0..1] to some interesting color gradient
 fn perlin_color_map(t: f32) -> (f32, f32, f32) {
-    // We'll do a simple gradient from greenish to pinkish to bluish, etc.
-    // t in [0..1].
-    // Let's do a few "key" points, then interpolate.
-    // For a quick approach, we can just do a rainbow-like pattern in HSV or do a few ifs.
-    // We'll do a quick manual gradient:
-
-    // e.g. 0.0 => (0.2, 0.7, 0.3)  green
-    // 0.5 => (0.8, 0.2, 0.7) pinkish
-    // 1.0 => (0.2, 0.4, 0.9) bluish
-    if t < 0.5 {
-        let u = t * 2.0; // [0..1]
-        let r = 0.2 + 0.6 * u; // 0.2 -> 0.8
-        let g = 0.7 - 0.5 * u; // 0.7 -> 0.2
-        let b = 0.3 + 0.4 * u; // 0.3 -> 0.7
+    // We'll do something from greenish -> bluish -> pinkish
+    // This is just an example.
+    if t < 0.33 {
+        let u = t / 0.33; 
+        let r = 0.1 + 0.2*u;
+        let g = 0.7 - 0.3*u;
+        let b = 0.3 + 0.4*u;
+        (r, g, b)
+    } else if t < 0.66 {
+        let u = (t - 0.33)/0.33; 
+        let r = 0.3 + 0.5*u;
+        let g = 0.4 - 0.2*u;
+        let b = 0.7 + 0.2*u;
         (r, g, b)
     } else {
-        let u = (t - 0.5) * 2.0; // [0..1]
-        let r = 0.8 - 0.6 * u; // 0.8 -> 0.2
-        let g = 0.2 + 0.2 * u; // 0.2 -> 0.4
-        let b = 0.7 + 0.2 * u; // 0.7 -> 0.9
+        let u = (t - 0.66)/0.34;
+        let r = 0.8 + 0.2*u; 
+        let g = 0.2 + 0.3*u;
+        let b = 0.9 - 0.2*u;
         (r, g, b)
     }
+}
+
+/// Atmosphere color: usually bluish -> pinkish
+fn atmosphere_color_map(t: f32) -> (f32, f32, f32) {
+    // We'll do a mild gradient
+    // 0 => (0.3, 0.5, 0.8), 1 => (1.0, 0.6, 0.7)
+    let r = 0.3 + 0.7*t;
+    let g = 0.5 + 0.1*t;
+    let b = 0.8 - 0.1*t;
+    (r, g, b)
+}
+
+/// Cloud color: near white, sometimes a bit grey/blue
+fn cloud_color_map(t: f32) -> (f32, f32, f32) {
+    // We'll clamp near white
+    let grey = 0.8 + 0.2*t; 
+    let tint = 0.9 + 0.1*t; 
+    // just shift it slightly 
+    (tint, grey, tint)
 }
