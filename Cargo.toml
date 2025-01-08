@@ -1,1 +1,11 @@
+[package]
+name = "voxel"
+version = "0.1.0"
+edition = "2021"
 
+[dependencies]
+wgpu = "0.16"
+winit = "0.28"
+pollster = "0.3"
+glam = "0.26"
+rand = "0.8"
