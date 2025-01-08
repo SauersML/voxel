@@ -350,7 +350,7 @@ impl State {
         //  - Uses two directional lights + a rim light + a small glow factor
         //  - Also supports alpha blending for subtle dust
         //
-        let shader_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Voxel Shader"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
                 r#"
