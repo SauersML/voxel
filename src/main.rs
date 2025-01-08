@@ -1,5 +1,6 @@
 use std::iter;
 use std::mem;
+
 use wgpu::util::DeviceExt;
 use winit::{
     dpi::PhysicalSize,
@@ -8,57 +9,54 @@ use winit::{
     window::WindowBuilder,
 };
 
-// We'll use glam for vector/matrix math, and rand for color/position generation
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec2, Vec3};
 use rand::Rng;
+use noise::{NoiseFn, Perlin};
 
 //
-// GEOMETRY DATA (one cube, used by all voxels & dust)
+// ========================= CUBE GEOMETRY =========================
 //
 
-// Each face has 4 vertices, and a cube has 6 faces => 24 vertices total
-// Here, we store position, normal, and UV (although the UV isn't used)
 #[rustfmt::skip]
 const VERTICES: &[f32] = &[
-    // Positions           // Normals          // UVs
-    // Face +X
-    0.5,  0.5, -0.5,      1.0,  0.0,  0.0,     1.0, 0.0,
-    0.5, -0.5, -0.5,      1.0,  0.0,  0.0,     0.0, 0.0,
-    0.5, -0.5,  0.5,      1.0,  0.0,  0.0,     0.0, 1.0,
-    0.5,  0.5,  0.5,      1.0,  0.0,  0.0,     1.0, 1.0,
+    // position         normal           uv
+    // +X
+    0.5,  0.5, -0.5,   1.0,  0.0,  0.0,  1.0, 0.0,
+    0.5, -0.5, -0.5,   1.0,  0.0,  0.0,  0.0, 0.0,
+    0.5, -0.5,  0.5,   1.0,  0.0,  0.0,  0.0, 1.0,
+    0.5,  0.5,  0.5,   1.0,  0.0,  0.0,  1.0, 1.0,
 
-    // Face -X
-   -0.5,  0.5,  0.5,     -1.0,  0.0,  0.0,     1.0, 0.0,
-   -0.5, -0.5,  0.5,     -1.0,  0.0,  0.0,     0.0, 0.0,
-   -0.5, -0.5, -0.5,     -1.0,  0.0,  0.0,     0.0, 1.0,
-   -0.5,  0.5, -0.5,     -1.0,  0.0,  0.0,     1.0, 1.0,
+    // -X
+   -0.5,  0.5,  0.5,  -1.0,  0.0,  0.0,  1.0, 0.0,
+   -0.5, -0.5,  0.5,  -1.0,  0.0,  0.0,  0.0, 0.0,
+   -0.5, -0.5, -0.5,  -1.0,  0.0,  0.0,  0.0, 1.0,
+   -0.5,  0.5, -0.5,  -1.0,  0.0,  0.0,  1.0, 1.0,
 
-    // Face +Y
-   -0.5,  0.5,  0.5,      0.0,  1.0,  0.0,     1.0, 0.0,
-   -0.5,  0.5, -0.5,      0.0,  1.0,  0.0,     0.0, 0.0,
-    0.5,  0.5, -0.5,      0.0,  1.0,  0.0,     0.0, 1.0,
-    0.5,  0.5,  0.5,      0.0,  1.0,  0.0,     1.0, 1.0,
+    // +Y
+   -0.5,  0.5,  0.5,   0.0,  1.0,  0.0,  1.0, 0.0,
+   -0.5,  0.5, -0.5,   0.0,  1.0,  0.0,  0.0, 0.0,
+    0.5,  0.5, -0.5,   0.0,  1.0,  0.0,  0.0, 1.0,
+    0.5,  0.5,  0.5,   0.0,  1.0,  0.0,  1.0, 1.0,
 
-    // Face -Y
-    0.5, -0.5,  0.5,      0.0, -1.0,  0.0,     1.0, 0.0,
-    0.5, -0.5, -0.5,      0.0, -1.0,  0.0,     0.0, 0.0,
-   -0.5, -0.5, -0.5,      0.0, -1.0,  0.0,     0.0, 1.0,
-   -0.5, -0.5,  0.5,      0.0, -1.0,  0.0,     1.0, 1.0,
+    // -Y
+    0.5, -0.5,  0.5,   0.0, -1.0,  0.0,  1.0, 0.0,
+    0.5, -0.5, -0.5,   0.0, -1.0,  0.0,  0.0, 0.0,
+   -0.5, -0.5, -0.5,   0.0, -1.0,  0.0,  0.0, 1.0,
+   -0.5, -0.5,  0.5,   0.0, -1.0,  0.0,  1.0, 1.0,
 
-    // Face +Z
-    0.5,  0.5,  0.5,      0.0,  0.0,  1.0,     1.0, 0.0,
-    0.5, -0.5,  0.5,      0.0,  0.0,  1.0,     0.0, 0.0,
-   -0.5, -0.5,  0.5,      0.0,  0.0,  1.0,     0.0, 1.0,
-   -0.5,  0.5,  0.5,      0.0,  0.0,  1.0,     1.0, 1.0,
+    // +Z
+    0.5,  0.5,  0.5,   0.0,  0.0,  1.0,  1.0, 0.0,
+    0.5, -0.5,  0.5,   0.0,  0.0,  1.0,  0.0, 0.0,
+   -0.5, -0.5,  0.5,   0.0,  0.0,  1.0,  0.0, 1.0,
+   -0.5,  0.5,  0.5,   0.0,  0.0,  1.0,  1.0, 1.0,
 
-    // Face -Z
-   -0.5,  0.5, -0.5,      0.0,  0.0, -1.0,     1.0, 0.0,
-   -0.5, -0.5, -0.5,      0.0,  0.0, -1.0,     0.0, 0.0,
-    0.5, -0.5, -0.5,      0.0,  0.0, -1.0,     0.0, 1.0,
-    0.5,  0.5, -0.5,      0.0,  0.0, -1.0,     1.0, 1.0,
+    // -Z
+   -0.5,  0.5, -0.5,   0.0,  0.0, -1.0,  1.0, 0.0,
+   -0.5, -0.5, -0.5,   0.0,  0.0, -1.0,  0.0, 0.0,
+    0.5, -0.5, -0.5,   0.0,  0.0, -1.0,  0.0, 1.0,
+    0.5,  0.5, -0.5,   0.0,  0.0, -1.0,  1.0, 1.0,
 ];
 
-// Each face = 2 triangles = 6 faces * 2 = 12 triangles => 36 indices
 #[rustfmt::skip]
 const INDICES: &[u16] = &[
     0, 1, 2,  0, 2, 3,   
@@ -70,11 +68,7 @@ const INDICES: &[u16] = &[
 ];
 
 //
-// PER-INSTANCE DATA
-//
-// We’ll store position, scale, color, and alpha for each instance.
-// That way, we can draw both "voxels" and "dust" in the same draw call, 
-// just with different scales/colors/alphas.
+// ========================= INSTANCE DATA =========================
 //
 
 #[repr(C)]
@@ -123,7 +117,7 @@ impl InstanceData {
 }
 
 //
-// CAMERA UNIFORM
+// ========================= CAMERA UNIFORM =========================
 //
 
 #[repr(C)]
@@ -133,10 +127,24 @@ struct CameraUniform {
 }
 
 //
-// RENDERING STATE
+// ========================= CUSTOM ORBITING DUST DATA =========================
+//
+
+/// For each dust particle, we store its orbit radius, speed, and current angle.
+#[derive(Clone, Copy)]
+struct DustOrbit {
+    radius: f32,
+    angle: f32,
+    speed: f32,
+    height: f32, // how high above the origin it orbits
+}
+
+//
+// ========================= APP STATE =========================
 //
 
 struct State {
+    // WGPU + Window
     surface: wgpu::Surface,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -152,23 +160,36 @@ struct State {
     index_buffer: wgpu::Buffer,
     num_indices: u32,
 
-    // Instances (voxels + dust)
+    // Instances
+    sphere_instances: Vec<InstanceData>,
+    dust_orbits: Vec<DustOrbit>, // separate CPU data for dust orbiting
+    dust_instances: Vec<InstanceData>,
     instance_buffer: wgpu::Buffer,
-    num_instances: u32,
+    num_instances_total: u32,
+
+    // Perlin noise for color
+    perlin: Perlin,
 
     // Camera
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
 
-    // Animation frame
-    frame: f32,
+    // Animation
+    time: f32,
+
+    // Camera controls
+    camera_yaw: f32,   // horizontal rotation
+    camera_pitch: f32, // vertical rotation
+    camera_dist: f32,  // distance from center
+
+    last_mouse_pos: Option<(f64, f64)>,
+    mouse_pressed: bool,
 }
 
 impl State {
-    /// Create the State and all GPU resources
     async fn new(window: &winit::window::Window) -> Self {
-        // Create instance + surface + adapter
+        // Setup instance + surface + adapter
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         let surface = unsafe { instance.create_surface(window) }.unwrap();
@@ -179,9 +200,9 @@ impl State {
                 force_fallback_adapter: false,
             })
             .await
-            .expect("Failed to find a suitable GPU adapter");
+            .expect("Failed to find GPU adapter!");
 
-        // Create device + queue
+        // Device + queue
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -194,7 +215,7 @@ impl State {
             .await
             .unwrap();
 
-        // Surface configuration
+        // Surface config
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps.formats[0];
         let config = wgpu::SurfaceConfiguration {
@@ -210,7 +231,7 @@ impl State {
 
         // Depth texture
         let depth_texture_desc = &wgpu::TextureDescriptor {
-            label: Some("Depth Texture"),
+            label: Some("DepthTexture"),
             size: wgpu::Extent3d {
                 width: config.width,
                 height: config.height,
@@ -226,7 +247,7 @@ impl State {
         let depth_texture = device.create_texture(depth_texture_desc);
         let depth_texture_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Create vertex & index buffers (cube)
+        // Buffers for geometry
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cube Vertex Buffer"),
             contents: bytemuck::cast_slice(VERTICES),
@@ -240,74 +261,74 @@ impl State {
         let num_indices = INDICES.len() as u32;
 
         //
-        // Generate noisy sphere + dust instance data
+        // Build main voxel sphere
         //
-
-        let mut instances: Vec<InstanceData> = Vec::new();
+        let mut sphere_instances = Vec::new();
         let mut rng = rand::thread_rng();
-
-        // 1) Voxel "noisy sphere"
-        //    We'll sample in a 32^3 region around the origin
-        //    radius ~ 12 plus up to +2 noise
+        let radius = 12.0;
+        // We’ll do a 32^3 region, check distance from center
+        // We'll sample Perlin to pick color in patches
         for x in -16..16 {
             for y in -16..16 {
                 for z in -16..16 {
-                    let vx = x as f32 + 0.5;
-                    let vy = y as f32 + 0.5;
-                    let vz = z as f32 + 0.5;
-                    let dist = (vx * vx + vy * vy + vz * vz).sqrt();
+                    let fx = x as f32 + 0.5;
+                    let fy = y as f32 + 0.5;
+                    let fz = z as f32 + 0.5;
+                    let dist = (fx*fx + fy*fy + fz*fz).sqrt();
                     let noise = rng.gen_range(0.0..2.0);
-                    if dist < 12.0 + noise {
-                        // Colors focusing on purples, pinks, greens, blues
-                        // Example: pick a random hue in [180..360], random saturation/value
-                        let hue = rng.gen_range(180.0..360.0);
-                        let saturation = rng.gen_range(0.6..1.0);
-                        let value = rng.gen_range(0.6..1.0);
-                        let (r, g, b) = hsv_to_rgb(hue, saturation, value);
-
-                        let voxel = InstanceData {
-                            position: [vx, vy, vz],
-                            scale: 1.0,     // normal voxel size
-                            color: [r, g, b],
-                            alpha: 1.0,     // fully opaque
-                        };
-                        instances.push(voxel);
+                    if dist < radius + noise {
+                        // We'll fill real color from Perlin later in update() to make it shift
+                        let placeholder_color = [0.5, 0.5, 0.5];
+                        sphere_instances.push(InstanceData {
+                            position: [fx, fy, fz],
+                            scale: 1.0,
+                            color: placeholder_color,
+                            alpha: 1.0,
+                        });
                     }
                 }
             }
         }
 
-        // 2) Subtle dust particles
-        //    We'll scatter, say, 300 dust cubes in a bigger region
-        //    They are small and partially transparent.
+        //
+        // Build orbiting dust
+        //
+        // Instead of random position, we store orbit info (radius, speed, angle).
+        // We'll update them each frame and fill into "dust_instances".
+        let mut dust_orbits = Vec::new();
+        let mut dust_instances = Vec::new();
         for _ in 0..300 {
-            let dx = rng.gen_range(-30.0..30.0);
-            let dy = rng.gen_range(-10.0..30.0);
-            let dz = rng.gen_range(-30.0..30.0);
+            let orbit_radius = rng.gen_range(15.0..35.0);
+            let speed = rng.gen_range(0.005..0.02); // vary speed
+            let angle = rng.gen_range(0.0..std::f32::consts::TAU);
+            let height = rng.gen_range(-5.0..15.0);
 
-            let hue = rng.gen_range(180.0..360.0);
-            let saturation = rng.gen_range(0.2..0.4);
-            let value = rng.gen_range(0.7..1.0);
-            let (r, g, b) = hsv_to_rgb(hue, saturation, value);
-
-            let dust = InstanceData {
-                position: [dx, dy, dz],
-                scale: 0.2,         // smaller than a normal voxel
-                color: [r, g, b],
-                alpha: 0.15,        // mostly transparent
-            };
-            instances.push(dust);
+            dust_orbits.push(DustOrbit {
+                radius: orbit_radius,
+                angle,
+                speed,
+                height,
+            });
+            // placeholder instance
+            dust_instances.push(InstanceData {
+                position: [0.0, 0.0, 0.0],
+                scale: 0.2,
+                color: [1.0, 1.0, 1.0],
+                alpha: 0.15,
+            });
         }
 
+        // Combined instance buffer
+        let num_instances_total = (sphere_instances.len() + dust_instances.len()) as u32;
+        let combined = [sphere_instances.as_slice(), dust_instances.as_slice()].concat();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&instances),
-            usage: wgpu::BufferUsages::VERTEX,
+            contents: bytemuck::cast_slice(&combined),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
-        let num_instances = instances.len() as u32;
 
         //
-        // Camera + Uniform
+        // Camera
         //
         let camera_uniform = CameraUniform {
             view_proj: Mat4::IDENTITY.to_cols_array(),
@@ -317,10 +338,9 @@ impl State {
             contents: bytemuck::cast_slice(&camera_uniform.view_proj),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Camera Bind Group Layout"),
+                label: Some("Camera BGL"),
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -334,9 +354,8 @@ impl State {
                     },
                 ],
             });
-
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Camera Bind Group"),
+            label: Some("Camera BG"),
             layout: &camera_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -345,16 +364,16 @@ impl State {
         });
 
         //
-        // WGSL SHADER
-        //  - Accepts instance data for position + scale + color + alpha
-        //  - Uses two directional lights + a rim light + a small glow factor
-        //  - Also supports alpha blending for subtle dust
+        // Shader
+        //
+        // We’ll do simpler Lambert shading with two directional lights + small ambient.
+        // No rim light. Reduced brightness for more subtle shading.
         //
         let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Voxel Shader"),
             source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(
                 r#"
-@group(0) @binding(0)
+@group(0) @binding(0) 
 var<uniform> viewProj: mat4x4<f32>;
 
 struct Instance {
@@ -364,70 +383,59 @@ struct Instance {
     @location(8) alpha: f32,
 };
 
-struct VertexOutput {
+struct VSOut {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) normal: vec3<f32>,
-    @location(1) fragColor: vec3<f32>,
-    @location(2) fragAlpha: f32,
-    @location(3) worldPos: vec3<f32>,
+    @location(1) color: vec3<f32>,
+    @location(2) alpha: f32,
 };
 
 @vertex
 fn vs_main(
     @location(0) inPos: vec3<f32>,
     @location(1) inNormal: vec3<f32>,
-    @location(2) _inUV: vec2<f32>,
+    @location(2) inUV: vec2<f32>,
     inst: Instance
-) -> VertexOutput {
-    var out: VertexOutput;
-    // Scale the cube by inst.scale, then translate
-    let worldPos = (inPos * inst.scale) + inst.pos;
+) -> VSOut {
+    var out: VSOut;
+    let worldPos = inPos * inst.scale + inst.pos;
     out.clip_position = viewProj * vec4<f32>(worldPos, 1.0);
-
-    // Normal is scaled by inst.scale too, though if scale is uniform, direction remains same
-    out.normal = normalize(inNormal);
-    out.fragColor = inst.color;
-    out.fragAlpha = inst.alpha;
-    out.worldPos = worldPos;
+    out.normal = normalize(inNormal); // scale is uniform, so no real distortion
+    out.color = inst.color;
+    out.alpha = inst.alpha;
     return out;
 }
 
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Two directional lights for a more interesting look
-    let lightDir1 = normalize(vec3<f32>(0.5, 1.0, 0.3));
-    let lightDir2 = normalize(vec3<f32>(-0.8, 0.4, 0.2));
-    let lightColor1 = vec3<f32>(1.0, 0.95, 0.9);
-    let lightColor2 = vec3<f32>(0.6, 0.8, 1.0);
-    let n = normalize(in.normal);
+fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
+    let n = normalize(input.normal);
 
-    let diff1 = max(dot(n, lightDir1), 0.0);
-    let diff2 = max(dot(n, lightDir2), 0.0);
-    let diffuse = diff1 * lightColor1 + diff2 * lightColor2;
+    // Two directional lights
+    let lightDir1 = normalize(vec3<f32>(0.2, 1.0, 0.3));
+    let lightDir2 = normalize(vec3<f32>(-0.4, 0.7, -0.2));
+    let color1    = vec3<f32>(1.0, 0.95, 0.9);
+    let color2    = vec3<f32>(0.6, 0.7, 1.0);
 
-    // Rim light (fake “Fresnel”)
-    // We'll approximate the "view direction" as from above or from camera at +Z in local coords
-    let viewDir = normalize(vec3<f32>(0.0, 0.0, 1.0));
-    let rim = 1.0 - max(dot(n, viewDir), 0.0);
-    let rim_color = vec3<f32>(1.0, 0.2, 0.9) * pow(rim, 3.0);
+    // Lambert
+    let d1 = max(dot(n, lightDir1), 0.0);
+    let d2 = max(dot(n, lightDir2), 0.0);
 
-    // Slight "glow" factor
-    let glow = 0.05;
+    // minimal ambient
+    let ambient = 0.15;
 
-    let base = in.fragColor;
-    let color = base + diffuse + rim_color + glow;
+    let finalColor = input.color * (ambient + 0.5*d1*color1 + 0.5*d2*color2);
 
-    return vec4<f32>(color, in.fragAlpha);
+    return vec4<f32>(finalColor, input.alpha);
 }
 "#
             )),
         });
 
         //
-        // PIPELINE LAYOUT + RENDER PIPELINE
+        // Pipeline
         //
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Render Pipeline Layout"),
+            label: Some("Pipeline Layout"),
             bind_group_layouts: &[&camera_bind_group_layout],
             push_constant_ranges: &[],
         });
@@ -439,23 +447,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 module: &shader_module,
                 entry_point: "vs_main",
                 buffers: &[
+                    // Cube geometry
                     wgpu::VertexBufferLayout {
                         array_stride: mem::size_of::<f32>() as wgpu::BufferAddress * 8,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &[
-                            // position (x, y, z)
+                            // position
                             wgpu::VertexAttribute {
                                 offset: 0,
                                 shader_location: 0,
                                 format: wgpu::VertexFormat::Float32x3,
                             },
-                            // normal (x, y, z)
+                            // normal
                             wgpu::VertexAttribute {
                                 offset: (4 * 3) as wgpu::BufferAddress,
                                 shader_location: 1,
                                 format: wgpu::VertexFormat::Float32x3,
                             },
-                            // uv (x, y) [unused]
+                            // uv
                             wgpu::VertexAttribute {
                                 offset: (4 * 6) as wgpu::BufferAddress,
                                 shader_location: 2,
@@ -463,6 +472,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                             },
                         ],
                     },
+                    // Instance data
                     InstanceData::desc(),
                 ],
             },
@@ -471,7 +481,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    // Enable alpha blending so dust can be partially transparent
                     blend: Some(wgpu::BlendState {
                         color: wgpu::BlendComponent::OVER,
                         alpha: wgpu::BlendComponent::OVER,
@@ -481,8 +490,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
+                front_face: wgpu::FrontFace::Ccw,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 strip_index_format: None,
                 unclipped_depth: false,
@@ -496,13 +505,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: 1,              // no MSAA
-                mask: !0,             
+                count: 1,
+                mask: !0,
                 alpha_to_coverage_enabled: false,
             },
             multiview: None,
         });
 
+        // Final
         Self {
             surface,
             device,
@@ -514,16 +524,31 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             vertex_buffer,
             index_buffer,
             num_indices,
+
+            sphere_instances,
+            dust_orbits,
+            dust_instances,
             instance_buffer,
-            num_instances,
+            num_instances_total,
+
+            perlin: Perlin::new(),
+
             camera_uniform,
             camera_buffer,
             camera_bind_group,
-            frame: 0.0,
+
+            time: 0.0,
+
+            camera_yaw: 0.0,
+            camera_pitch: 0.3,
+            camera_dist: 60.0,
+
+            last_mouse_pos: None,
+            mouse_pressed: false,
         }
     }
 
-    /// Resize callback
+    /// Resize
     fn resize(&mut self, new_size: PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
@@ -531,12 +556,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
 
-            // Recreate depth texture
             let depth_texture_desc = &wgpu::TextureDescriptor {
-                label: Some("Depth Texture"),
+                label: Some("DepthTexture"),
                 size: wgpu::Extent3d {
-                    width: self.config.width,
-                    height: self.config.height,
+                    width: new_size.width,
+                    height: new_size.height,
                     depth_or_array_layers: 1,
                 },
                 mip_level_count: 1,
@@ -547,27 +571,64 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 view_formats: &[],
             };
             let depth_texture = self.device.create_texture(depth_texture_desc);
-            self.depth_texture_view =
-                depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.depth_texture_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
         }
     }
 
-    /// Called every frame, we spin around the Y-axis
+    /// Update every frame
     fn update(&mut self) {
-        self.frame += 0.01;
+        self.time += 0.01;
 
-        let aspect = self.config.width as f32 / self.config.height as f32;
-        let fovy = 45.0f32.to_radians();
-        let near = 0.1;
-        let far = 1000.0;
+        // 1) Update sphere color with Perlin noise that shifts over time
+        // We sample noise in [x, y, z, time], then map to color
+        let freq = 0.06; // scale of noise
+        for inst in &mut self.sphere_instances {
+            let x = inst.position[0] as f64 * freq;
+            let y = inst.position[1] as f64 * freq;
+            let z = inst.position[2] as f64 * freq;
+            let t = self.time as f64 * 0.3; // shift over time
+            // sample in 4D: (x, y, z+ t)
+            let val = self.perlin.get([x, y, z + t]);
+            // val in [-1..1], map to [0..1]
+            let normalized = 0.5 * (val + 1.0);
+            // We'll pick a color in e.g. green-blue-pinkish range
+            let (r, g, b) = perlin_color_map(normalized as f32);
+            inst.color = [r, g, b];
+        }
 
-        // Orbit around the origin
-        let radius = 40.0;
-        let eye = Vec3::new(
-            self.frame.cos() * radius,
-            20.0,
-            self.frame.sin() * radius,
+        // 2) Update dust orbit
+        for (i, orbit) in self.dust_orbits.iter_mut().enumerate() {
+            orbit.angle += orbit.speed;
+            let x = orbit.radius * orbit.angle.cos();
+            let z = orbit.radius * orbit.angle.sin();
+            let y = orbit.height;
+            self.dust_instances[i].position = [x, y, z];
+        }
+
+        // 3) Combine into single instance buffer
+        let combined = [
+            self.sphere_instances.as_slice(),
+            self.dust_instances.as_slice(),
+        ]
+        .concat();
+        self.queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&combined),
         );
+
+        // 4) Recompute camera
+        let aspect = self.config.width as f32 / self.config.height as f32;
+        let fovy = 45f32.to_radians();
+        let near = 0.1;
+        let far = 2000.0;
+
+        // Convert yaw/pitch/dist to eye pos
+        let eye_x = self.camera_dist * self.camera_yaw.cos() * self.camera_pitch.cos();
+        let eye_y = self.camera_dist * self.camera_pitch.sin();
+        let eye_z = self.camera_dist * self.camera_yaw.sin() * self.camera_pitch.cos();
+        let eye = Vec3::new(eye_x, eye_y, eye_z);
+
         let center = Vec3::ZERO;
         let up = Vec3::Y;
 
@@ -585,8 +646,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     /// Render a frame
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        let output = self.surface.get_current_texture()?;
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let frame = self.surface.get_current_texture()?;
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let mut encoder =
             self.device
@@ -595,17 +656,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                 });
 
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Main Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        // Dark background with a slight bluish tint
+                        // Slightly dark background
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.02,
-                            g: 0.02,
-                            b: 0.07,
+                            r: 0.01,
+                            g: 0.01,
+                            b: 0.02,
                             a: 1.0,
                         }),
                         store: true,
@@ -620,25 +681,71 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                     stencil_ops: None,
                 }),
             });
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            rp.set_pipeline(&self.render_pipeline);
+            rp.set_bind_group(0, &self.camera_bind_group, &[]);
+            rp.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            rp.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            rp.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
-            // Draw all instances at once
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.num_instances);
+            rp.draw_indexed(0..self.num_indices, 0, 0..self.num_instances_total);
         }
 
         self.queue.submit(iter::once(encoder.finish()));
-        output.present();
-
+        frame.present();
         Ok(())
+    }
+
+    /// Handle input events
+    fn input(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            // Mouse press
+            WindowEvent::MouseInput { state, button, .. } => {
+                if *button == MouseButton::Left {
+                    self.mouse_pressed = *state == ElementState::Pressed;
+                }
+                false
+            }
+            // Mouse move
+            WindowEvent::CursorMoved { position, .. } => {
+                if self.mouse_pressed {
+                    // Drag => rotate
+                    let (x, y) = (position.x, position.y);
+                    if let Some((last_x, last_y)) = self.last_mouse_pos {
+                        let dx = (x - last_x) as f32 * 0.005;
+                        let dy = (y - last_y) as f32 * 0.005;
+                        self.camera_yaw += dx;
+                        self.camera_pitch -= dy;
+                        // clamp pitch
+                        self.camera_pitch = self.camera_pitch.clamp(-1.5, 1.5);
+                    }
+                    self.last_mouse_pos = Some((x, y));
+                } else {
+                    self.last_mouse_pos = Some((position.x, position.y));
+                }
+                false
+            }
+            // Scroll => zoom
+            WindowEvent::MouseWheel { delta, .. } => {
+                let scroll = match delta {
+                    MouseScrollDelta::LineDelta(_, scroll) => *scroll,
+                    MouseScrollDelta::PixelDelta(px) => px.y as f32 / 60.0,
+                };
+                self.camera_dist -= scroll * 2.0;
+                if self.camera_dist < 10.0 {
+                    self.camera_dist = 10.0;
+                }
+                if self.camera_dist > 300.0 {
+                    self.camera_dist = 300.0;
+                }
+                false
+            }
+            _ => false,
+        }
     }
 }
 
 //
-// ENTRY POINT
+// ========================= MAIN ENTRY =========================
 //
 
 fn main() {
@@ -649,80 +756,89 @@ fn main() {
 async fn run() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-        .with_title("Colorful Noisy Sphere + Dust (wgpu)")
+        .with_title("Noisy Sphere + Perlin Color + Orbiting Dust (wgpu)")
         .build(&event_loop)
         .unwrap();
 
     let mut state = State::new(&window).await;
 
-    event_loop.run(move |event, _, control_flow| match event {
-        Event::WindowEvent {
-            event,
-            window_id,
-        } if window_id == window.id() => match event {
-            WindowEvent::CloseRequested
-            | WindowEvent::KeyboardInput {
-                input:
-                    KeyboardInput {
-                        state: ElementState::Pressed,
-                        virtual_keycode: Some(VirtualKeyCode::Escape),
+    event_loop.run(move |event, _, control_flow| {
+        match &event {
+            Event::WindowEvent {
+                ref event,
+                window_id,
+            } if *window_id == window.id() => {
+                match event {
+                    WindowEvent::CloseRequested
+                    | WindowEvent::KeyboardInput {
+                        input:
+                            KeyboardInput {
+                                state: ElementState::Pressed,
+                                virtual_keycode: Some(VirtualKeyCode::Escape),
+                                ..
+                            },
                         ..
-                    },
-                ..
-            } => *control_flow = ControlFlow::Exit,
+                    } => *control_flow = ControlFlow::Exit,
 
-            WindowEvent::Resized(physical_size) => {
-                state.resize(physical_size);
+                    WindowEvent::Resized(physical_size) => {
+                        state.resize(*physical_size);
+                    }
+
+                    WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                        state.resize(**new_inner_size);
+                    }
+
+                    // Handle mouse/pan input
+                    _ => {
+                        if state.input(event) {
+                            // handled
+                        }
+                    }
+                }
             }
-
-            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                state.resize(*new_inner_size);
+            Event::RedrawRequested(_) => {
+                state.update();
+                match state.render() {
+                    Ok(_) => {}
+                    Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                    Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
+                    Err(e) => eprintln!("render error: {:?}", e),
+                }
             }
-
+            Event::MainEventsCleared => {
+                window.request_redraw();
+            }
             _ => {}
-        },
-        Event::RedrawRequested(_) => {
-            state.update();
-            match state.render() {
-                Ok(_) => {}
-                // If lost, reconfigure surface
-                Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
-                // If out of memory, exit
-                Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                // Other errors (Outdated, Timeout) are transient
-                Err(e) => eprintln!("{:?}", e),
-            }
         }
-        Event::MainEventsCleared => {
-            // Request a redraw
-            window.request_redraw();
-        }
-        _ => {}
     });
 }
 
 //
-// HELPER: Convert HSV -> RGB for pretty random colors
+// ========================= COLOR MAPPING =========================
 //
-fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
-    let c = v * s;
-    let hh = h / 60.0;
-    let x = c * (1.0 - ((hh % 2.0) - 1.0).abs());
 
-    let (r1, g1, b1) = if hh < 1.0 {
-        (c, x, 0.0)
-    } else if hh < 2.0 {
-        (x, c, 0.0)
-    } else if hh < 3.0 {
-        (0.0, c, x)
-    } else if hh < 4.0 {
-        (0.0, x, c)
-    } else if hh < 5.0 {
-        (x, 0.0, c)
+/// Map a single float in [0..1] to some "cool" color range for the sphere.
+fn perlin_color_map(t: f32) -> (f32, f32, f32) {
+    // We'll do a simple gradient from greenish to pinkish to bluish, etc.
+    // t in [0..1].
+    // Let's do a few "key" points, then interpolate.
+    // For a quick approach, we can just do a rainbow-like pattern in HSV or do a few ifs.
+    // We'll do a quick manual gradient:
+
+    // e.g. 0.0 => (0.2, 0.7, 0.3)  green
+    // 0.5 => (0.8, 0.2, 0.7) pinkish
+    // 1.0 => (0.2, 0.4, 0.9) bluish
+    if t < 0.5 {
+        let u = t * 2.0; // [0..1]
+        let r = 0.2 + 0.6 * u; // 0.2 -> 0.8
+        let g = 0.7 - 0.5 * u; // 0.7 -> 0.2
+        let b = 0.3 + 0.4 * u; // 0.3 -> 0.7
+        (r, g, b)
     } else {
-        (c, 0.0, x)
-    };
-
-    let m = v - c;
-    (r1 + m, g1 + m, b1 + m)
+        let u = (t - 0.5) * 2.0; // [0..1]
+        let r = 0.8 - 0.6 * u; // 0.8 -> 0.2
+        let g = 0.2 + 0.2 * u; // 0.2 -> 0.4
+        let b = 0.7 + 0.2 * u; // 0.7 -> 0.9
+        (r, g, b)
+    }
 }
