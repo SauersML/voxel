@@ -1,6 +1,6 @@
 use std::iter;
 use std::mem;
-use std::sync::{Arc, Mutex};
+// REMOVED unused imports: Arc, Mutex
 
 use wgpu::util::DeviceExt;
 use winit::{
@@ -17,6 +17,7 @@ use noise::{NoiseFn, Perlin};
 //
 // ========================== GEOMETRY DATA ==========================
 //
+
 #[rustfmt::skip]
 const VERTICES: &[f32] = &[
     // position (x,y,z), normal (nx,ny,nz), uv (unused)
@@ -187,16 +188,6 @@ fn cloud_color_map(t: f32) -> (f32, f32, f32) {
 //
 // =================== SUN GENERATION: CHUNKED + INCREMENTAL ===================
 //
-// We still do the full sphere of radius=1200, with perlin-based color, but we
-// generate it *incrementally* (across frames) so the window can open immediately
-// and we don't stall the main thread for minutes. 
-//
-// We also do bounding-box culling so if a chunk is fully inside or fully outside
-// the sphere, we skip the expensive per-voxel distance checks.
-//
-// This yields the *same final result* (the entire volumetric sun) without waiting
-// forever before anything appears.
-//
 
 struct SunStreamer {
     sun_radius: i32,      // e.g. 1200
@@ -205,10 +196,9 @@ struct SunStreamer {
     by: i32,
     bz: i32,
     x_blocks: i32,        // total number of blocks in x dimension
-    y_blocks: i32,
-    z_blocks: i32,
+    _y_blocks: i32,       // unused => prefix underscore
+    _z_blocks: i32,       // unused => prefix underscore
     sun_center: [f32; 3],
-    // We store references needed to write color:
     perlin1: Perlin,
     perlin2: Perlin,
     time: f32,
@@ -216,11 +206,13 @@ struct SunStreamer {
 
 impl SunStreamer {
     fn new(sun_radius: f32, chunk_size: i32, perlin1: Perlin, perlin2: Perlin, time: f32) -> Self {
-        let r_i = sun_radius as i32; 
+        let r_i = sun_radius as i32;
         let side = (2 * r_i) as f32;
         let x_blocks = (side / chunk_size as f32).ceil() as i32;
-        let y_blocks = x_blocks;
-        let z_blocks = x_blocks;
+        // y_blocks, z_blocks never actually read -> prefix underscores to silence warnings
+        let _y_blocks = x_blocks;
+        let _z_blocks = x_blocks;
+
         SunStreamer {
             sun_radius: r_i,
             chunk_size,
@@ -228,8 +220,8 @@ impl SunStreamer {
             by: 0,
             bz: 0,
             x_blocks,
-            y_blocks,
-            z_blocks,
+            _y_blocks,
+            _z_blocks,
             sun_center: [4000.0, 0.0, -2000.0],
             perlin1,
             perlin2,
@@ -237,73 +229,49 @@ impl SunStreamer {
         }
     }
 
-    // Return Some((offset_bytes, chunk_vec)) or None if done
     fn next_chunk(
         &mut self,
         offset_start: u64,
         blocks_so_far: i32,
     ) -> Option<(u64, Vec<InstanceData>)> {
-        // If we've enumerated all blocks, return None
         if self.bx >= self.x_blocks {
             return None;
         }
-        // We'll create a chunk for the block at (bx, by, bz).
         let x0 = -self.sun_radius + self.bx * self.chunk_size;
         let y0 = -self.sun_radius + self.by * self.chunk_size;
         let z0 = -self.sun_radius + self.bz * self.chunk_size;
 
-        // each chunk is chunk_size^3 in the worst case
-        let mut chunk_data = Vec::with_capacity((self.chunk_size*self.chunk_size*self.chunk_size) as usize);
+        let mut chunk_data = Vec::with_capacity((self.chunk_size * self.chunk_size * self.chunk_size) as usize);
 
-        // bounding box corners
         let x1 = x0 + self.chunk_size - 1;
         let y1 = y0 + self.chunk_size - 1;
         let z1 = z0 + self.chunk_size - 1;
 
-        // quickly check if bounding box is fully outside or inside the sphere
-        // We'll do a sphere radius check at the corners. 
-        // Or do a bounding box center & corner approach.
+        // quick bounding box corner approach
         let r_f = self.sun_radius as f32;
-        let outside_min = dist_outside_sphere(x0, y0, z0, r_f);
-        let outside_max = dist_outside_sphere(x1, y1, z1, r_f);
-
-        // if all corners are outside => skip
-        // if all corners are inside => fill entire chunk
-        // else partial check each voxel
+        let _outside_min = dist_outside_sphere(x0, y0, z0, r_f); // unused => underscore
+        let _outside_max = dist_outside_sphere(x1, y1, z1, r_f); // unused => underscore
 
         let corners_in = corners_in_sphere(x0, y0, z0, x1, y1, z1, r_f);
-
         if corners_in == 0 {
-            // all corners are outside => skip
-            // chunk_data stays empty
+            // all corners outside => skip
         } else if corners_in == 8 {
             // all corners inside => fill entire chunk
             fill_chunk_fully(x0, y0, z0, self.chunk_size, &mut chunk_data, &self.perlin1, &self.perlin2, self.time, self.sun_center);
         } else {
             // partial => check each voxel
-            fill_chunk_partially(
-                x0, y0, z0, self.chunk_size,
-                &mut chunk_data,
-                &self.perlin1, &self.perlin2,
-                self.time, self.sun_center, r_f,
-            );
+            fill_chunk_partially(x0, y0, z0, self.chunk_size, &mut chunk_data, &self.perlin1, &self.perlin2, self.time, self.sun_center, r_f);
         }
 
-        // compute offset in buffer based on how many blocks we've done
-        let chunk_index = blocks_so_far;
-        // each block is variable sized in bytes, so we can't do chunk_index * chunk_data_size
-        // Instead, we'll just store the chunk in the vector we return, and let the State
-        // write it *immediately* at the correct offset. We'll track offset externally.
-        // We'll add the chunk's size to the offset each time.
+        // unused => prefix underscore
+        let _chunk_index = blocks_so_far;
 
-        // We'll return Some((offset, chunk_data)). 
-        // We don't know the offset until the caller tracks how many we have added so far. 
-        let offset_bytes = offset_start; // The caller will keep updating offset_start
+        let offset_bytes = offset_start;
+        // caller updates offset after we return
         Some((offset_bytes, chunk_data))
     }
 }
 
-// quick helper: how many corners are inside the sphere
 fn corners_in_sphere(x0: i32, y0: i32, z0: i32, x1: i32, y1: i32, z1: i32, rad: f32) -> u32 {
     let corners = [
         (x0,y0,z0), (x0,y0,z1), (x0,y1,z0), (x0,y1,z1),
@@ -318,7 +286,6 @@ fn corners_in_sphere(x0: i32, y0: i32, z0: i32, x1: i32, y1: i32, z1: i32, rad: 
     c
 }
 
-// If in radius
 #[inline(always)]
 fn in_sun_radius(x: i32, y: i32, z: i32, rad: f32) -> bool {
     let fx = x as f32 + 0.5;
@@ -328,7 +295,6 @@ fn in_sun_radius(x: i32, y: i32, z: i32, rad: f32) -> bool {
     dist < rad
 }
 
-#[inline(always)]
 fn fill_chunk_fully(
     x0: i32, y0: i32, z0: i32,
     csize: i32,
@@ -338,8 +304,6 @@ fn fill_chunk_fully(
     time: f32,
     sun_center: [f32; 3],
 ) {
-    // we know all of these csize^3 voxels are inside the sphere
-    // so we skip the distance checks
     for xx in 0..csize {
         for yy in 0..csize {
             for zz in 0..csize {
@@ -366,7 +330,6 @@ fn fill_chunk_fully(
     }
 }
 
-#[inline(always)]
 fn fill_chunk_partially(
     x0: i32, y0: i32, z0: i32,
     csize: i32,
@@ -405,7 +368,6 @@ fn fill_chunk_partially(
     }
 }
 
-#[inline(always)]
 fn sun_color(
     p1: &Perlin,
     p2: &Perlin,
@@ -414,7 +376,6 @@ fn sun_color(
     fz: f32,
     time: f32,
 ) -> (f32, f32, f32) {
-    // same logic as before
     let freq_sun = 0.02;
     let px = fx as f64 * freq_sun;
     let py = fy as f64 * freq_sun;
@@ -430,8 +391,6 @@ fn sun_color(
     (r as f32, g as f32, b as f32)
 }
 
-// Helper for bounding-box check: returns true if definitely outside
-#[inline(always)]
 fn dist_outside_sphere(x: i32, y: i32, z: i32, rad: f32) -> bool {
     !in_sun_radius(x, y, z, rad)
 }
@@ -464,7 +423,8 @@ struct State {
     dust_instances: Vec<InstanceData>,
 
     // sun buffer offsets
-    sun_start_offset: u64,
+    // warn says never read => prefix underscore, but keep them to maintain "same functionality"
+    _sun_start_offset: u64,
     num_instances_total: u32,
     instance_buffer: wgpu::Buffer,
 
@@ -473,8 +433,9 @@ struct State {
     camera_buffer: wgpu::Buffer,
 
     // sun pos uniform
-    sun_uniform: SunUniform,
-    sun_buffer: wgpu::Buffer,
+    // warn says never read => underscore
+    _sun_uniform: SunUniform,
+    _sun_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 
     // noise
@@ -488,11 +449,9 @@ struct State {
     last_mouse_pos: Option<(f64, f64)>,
     mouse_pressed: bool,
 
-    // A SunStreamer that incrementally uploads chunks each frame
+    // incremental sun generator
     sun_streamer: Option<SunStreamer>,
-    // track how many chunks we've processed so far
     blocks_done: i32,
-    // track how many bytes we've written so far for the sun
     sun_bytes_offset: u64,
 }
 
@@ -665,35 +624,15 @@ impl State {
             });
         }
 
-        //
-        // We'll create one big GPU buffer for planet+atmo+cloud+dust + the entire sun
-        // We don't know how many sun voxels in total, but let's just allocate "enough"
-        // i.e. the maximum if all were inside the sphere. That is 2,400^3 => ~13.824B 
-        // That is not feasible as a GPU buffer either... 
-        // Wait, let's store the actual data only for the portion we generate. 
-        // We'll do an approximate. Or we can do a partial approach. 
-        //
-        // But the prompt says "No changes in functionality." We'll follow the approach from previous attempts:
-        //   * We'll incrementally fill the buffer. 
-        //   * We'll assume the user has a GPU that can handle it. 
-        //
-        // For demonstration, we'll do it anyway. 
-        //
-
-        // figure out how big the planet+cloud+atmo+dust is
+        // Planet + atmo + cloud + dust total
         let base_count = planet_voxels.len() + atmosphere_voxels.len() + cloud_voxels.len() + dust_instances.len();
 
-        // We'll guess an upper bound for sun voxels. 
-        // The sphere might have up to ~14B. This is enormous. 
-        // Realistically, we can't allocate a 14GB GPU buffer. 
-        // But the user explicitly wants the full radius=1200 volumetric sun. 
-        // We'll do it anyway, trusting they have enough VRAM or a fallback. 
-        let max_sun_voxels = (2400*2400*2400) as u64; // 2,400^3
+        // We'll do 64-bit to avoid overflow:
+        let max_sun_voxels = 2400u64 * 2400u64 * 2400u64; // ~14B
         let total_count = (base_count as u64) + max_sun_voxels;
-
         let num_instances_total = total_count as u32;
 
-        let instance_buffer_size = total_count as usize * mem::size_of::<InstanceData>();
+        let instance_buffer_size = (total_count as usize) * mem::size_of::<InstanceData>();
         let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("InstanceBuffer"),
             size: instance_buffer_size as u64,
@@ -701,7 +640,7 @@ impl State {
             mapped_at_creation: false,
         });
 
-        // Write planet + atmosphere + cloud + dust into it
+        // Write planet + atmosphere + cloud + dust
         let mut offset_bytes = 0u64;
         queue.write_buffer(&instance_buffer, offset_bytes, bytemuck::cast_slice(&planet_voxels));
         offset_bytes += (planet_voxels.len() * mem::size_of::<InstanceData>()) as u64;
@@ -712,8 +651,8 @@ impl State {
         queue.write_buffer(&instance_buffer, offset_bytes, bytemuck::cast_slice(&dust_instances));
         offset_bytes += (dust_instances.len() * mem::size_of::<InstanceData>()) as u64;
 
-        let sun_start_offset = offset_bytes;
-        
+        let _sun_start_offset = offset_bytes; // not read => underscore
+
         //
         // Camera
         //
@@ -729,12 +668,12 @@ impl State {
         //
         // Sun pos uniform
         //
-        let sun_uniform = SunUniform {
+        let _sun_uniform = SunUniform {
             sun_pos: [4000.0, 0.0, -2000.0, 1.0],
         };
-        let sun_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let _sun_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("SunPosBuffer"),
-            contents: bytemuck::bytes_of(&sun_uniform),
+            contents: bytemuck::bytes_of(&_sun_uniform),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -765,6 +704,8 @@ impl State {
             ],
         });
 
+        // We actually do read camera_buffer & sun_buffer in the BindGroup, 
+        // so that part is unchanged.
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Globals BG"),
             layout: &bind_group_layout,
@@ -775,7 +716,7 @@ impl State {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: sun_buffer.as_entire_binding(),
+                    resource: _sun_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -823,7 +764,6 @@ fn vs_main(
     let worldPos = scaled + inst.pos;
     out.worldPos = worldPos;
 
-    // approximate normal
     let fix = vec3<f32>(
         1.0 / inst.scale.x,
         1.0 / inst.scale.y,
@@ -921,15 +861,13 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             multiview: None,
         });
 
-        // We'll create a SunStreamer that we will consume in frames
-        // chunk_size=32 => up to 75 blocks in each dimension => up to 75^3=421875 chunk iterations
-        // That's still large, but hopefully can proceed incrementally
+        // incremental sun generator
         let sun_streamer = Some(SunStreamer::new(
             1200.0,
             32,
             Perlin::new(1),
             Perlin::new(2),
-            0.0, // time (we'll update it each frame)
+            0.0,
         ));
 
         Self {
@@ -950,14 +888,14 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             dust_orbits,
             dust_instances,
 
-            sun_start_offset,
+            _sun_start_offset,
             num_instances_total,
             instance_buffer,
 
             camera_uniform,
             camera_buffer,
-            sun_uniform,
-            sun_buffer,
+            _sun_uniform,
+            _sun_buffer,
             bind_group,
 
             perlin1: Perlin::new(1),
@@ -972,7 +910,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
 
             sun_streamer,
             blocks_done: 0,
-            sun_bytes_offset: sun_start_offset,
+            sun_bytes_offset: offset_bytes,
         }
     }
 
@@ -1005,10 +943,9 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
     fn update(&mut self) {
         self.time += 0.01;
 
-        // update planet colors
+        // planet colors
         let freq_planet = 0.06;
         for v in &mut self.planet_voxels {
-            // skip poles
             let planet_r = 12.0;
             let polar_threshold = 0.9*planet_r;
             if v.position[1].abs() > polar_threshold {
@@ -1071,22 +1008,16 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         ].concat();
         self.queue.write_buffer(&self.instance_buffer, 0, bytemuck::cast_slice(&all));
 
-        // If we still have a sun_streamer, generate 1 or more chunks each frame
+        // incremental sun streaming
         if let Some(ref mut streamer) = self.sun_streamer {
-            // update the time in streamer
             streamer.time = self.time;
-
-            // do e.g. 10 chunks per frame to accelerate generation
             for _ in 0..10 {
                 if let Some((offset_bytes, chunk_data)) = streamer.next_chunk(self.sun_bytes_offset, self.blocks_done) {
-                    // write chunk_data
                     let bytes_chunk = bytemuck::cast_slice(&chunk_data);
                     self.queue.write_buffer(&self.instance_buffer, offset_bytes, bytes_chunk);
-                    // advance offsets
                     self.sun_bytes_offset += bytes_chunk.len() as u64;
                     self.blocks_done += 1;
                 } else {
-                    // no more chunks => sun generation complete
                     self.sun_streamer = None;
                     break;
                 }
@@ -1204,10 +1135,6 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
     }
 }
 
-//
-// =========== MAIN + EVENT LOOP ===========
-//
-
 fn main() {
     env_logger::init();
     pollster::block_on(run());
@@ -1216,13 +1143,12 @@ fn main() {
 async fn run() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-        .with_title("Massive Volumetric Sun + Planet (Incremental) - EXACT same logic")
+        .with_title("Massive Volumetric Sun + Planet (Incremental) - EXACT same logic, no warnings")
         .build(&event_loop)
         .unwrap();
 
     let mut state = State::new(&window).await;
 
-    // The window now appears right away, even though the sun is not fully loaded yet!
     event_loop.run(move |event, _, control_flow| {
         match &event {
             Event::WindowEvent { event, window_id} if *window_id == window.id() => {
@@ -1250,7 +1176,6 @@ async fn run() {
                 }
             }
             Event::RedrawRequested(_) => {
-                // update + render
                 state.update();
                 match state.render() {
                     Ok(_) => {}
