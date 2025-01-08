@@ -666,7 +666,8 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
                 format: wgpu::TextureFormat::Depth24Plus,
                 depth_write_enabled: true,
                 depth_compare: wgpu::CompareFunction::Less,
-                ..Default::default()
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
