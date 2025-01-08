@@ -29,9 +29,7 @@ fn create_wgpu_instance() -> wgpu::Instance {
 
 //
 // ========================== GEOMETRY DATA ==========================
-// Reusable cube geometry for planet, atmosphere, clouds, dust, sun
 //
-
 #[rustfmt::skip]
 const VERTICES: &[f32] = &[
     // position (x,y,z), normal (nx,ny,nz), uv (unused)
@@ -101,25 +99,21 @@ impl InstanceData {
             array_stride: stride,
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &[
-                // position
                 wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 5,
                     format: wgpu::VertexFormat::Float32x3,
                 },
-                // scale
                 wgpu::VertexAttribute {
                     offset: 4 * 3,
                     shader_location: 6,
                     format: wgpu::VertexFormat::Float32x3,
                 },
-                // color
                 wgpu::VertexAttribute {
                     offset: 4 * 6,
                     shader_location: 7,
                     format: wgpu::VertexFormat::Float32x3,
                 },
-                // alpha
                 wgpu::VertexAttribute {
                     offset: 4 * 9,
                     shader_location: 8,
@@ -184,29 +178,28 @@ fn atmosphere_color_map(t: f32) -> (f32, f32, f32) {
     )
 }
 
-fn cloud_color_map(_t: f32) -> (f32, f32, f32) {
-    // We ignore Perlin color for clouds to keep them large & translucent
-    // => just return white
+// We use Perlin to shift cloud positions => slow movement. We'll keep color=white alpha=0.3
+// If you want color changes, you can incorporate `cloud_color_map(t)`.
+fn cloud_color_map(_: f32) -> (f32, f32, f32) {
+    // always white
     (1.0, 1.0, 1.0)
 }
 
 //
-// =========================== CHUNKED SUN ===========================
+// =========================== SUN CHUNK ===========================
+// We remove `#[derive(Clone)]` from SunChunk because wgpu::Buffer is not Clone
 //
-// The user wants the sun smaller + closer => let's do radius=120, center=(300,0,-100),
-// chunk_size=64 => fewer total blocks => less lag
-//
-// We'll do physically large blocks => scale=2.0 => or bigger
-// We'll keep a small "draw_all" function with explicit lifetimes to fix the lifetime error.
-//
-
-#[derive(Clone)]
 struct SunChunk {
     buffer: wgpu::Buffer,
     instances: Vec<InstanceData>,
     count: u32,
 }
 
+//
+// =========================== SUN MANAGER ===========================
+// We'll do smaller radius=120, chunk=64 => fewer blocks => faster
+// We'll place center around (300,0,-100).
+//
 struct SunManager {
     radius: i32,
     center: [f32; 3],
@@ -214,7 +207,6 @@ struct SunManager {
     perlin1: Perlin,
     perlin2: Perlin,
 
-    // chunk iteration
     bx: i32,
     by: i32,
     bz: i32,
@@ -227,7 +219,6 @@ struct SunManager {
 
 impl SunManager {
     fn new(radius: f32, chunk_size: i32, p1: Perlin, p2: Perlin) -> Self {
-        // We place the sun closer so we can see it
         let center = [300.0, 0.0, -100.0];
         let r_i = radius as i32;
         let side = 2 * r_i;
@@ -248,26 +239,17 @@ impl SunManager {
         }
     }
 
-    fn generate_chunks_per_frame(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        count: i32, // how many chunks to generate this frame
-    ) {
+    fn generate_chunks_per_frame(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, count: i32) {
         for _ in 0..count {
             if !self.generate_next_chunk(device, queue) {
-                break; // done
+                break;
             }
         }
     }
 
-    fn generate_next_chunk(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> bool {
+    fn generate_next_chunk(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
         if self.bx >= self.x_blocks {
-            return false; // no more
+            return false; // done
         }
         let x0 = -self.radius + self.bx * self.chunk_size;
         let y0 = -self.radius + self.by * self.chunk_size;
@@ -281,9 +263,10 @@ impl SunManager {
                     let gx = x0 + xx;
                     let gy = y0 + yy;
                     let gz = z0 + zz;
-                    let dist2 = (gx as f32 + 0.5).powi(2) + (gy as f32 + 0.5).powi(2) + (gz as f32 + 0.5).powi(2);
+                    let dist2 = (gx as f32 + 0.5).powi(2)
+                        + (gy as f32 + 0.5).powi(2)
+                        + (gz as f32 + 0.5).powi(2);
                     if dist2 < (self.radius as f32).powi(2) {
-                        // inside sun
                         let fx = gx as f32 + 0.5;
                         let fy = gy as f32 + 0.5;
                         let fz = gz as f32 + 0.5;
@@ -294,8 +277,8 @@ impl SunManager {
                         ];
                         data.push(InstanceData {
                             position: pos,
-                            scale: [2.0, 2.0, 2.0], // bigger blocks => fewer total
-                            color: [4.0, 3.5, 0.2], // initial color updated each frame
+                            scale: [2.0, 2.0, 2.0], // big blocks => fewer
+                            color: [4.0, 3.5, 0.2], // luminous placeholder
                             alpha: 1.0,
                         });
                     }
@@ -311,10 +294,12 @@ impl SunManager {
                 mapped_at_creation: false,
             });
             queue.write_buffer(&buffer, 0, bytemuck::cast_slice(&data));
+
+            let data_len = data.len(); // store length before moving `data`
             self.chunks.push(SunChunk {
                 buffer,
                 instances: data,
-                count: data.len() as u32,
+                count: data_len as u32,
             });
         }
 
@@ -335,7 +320,6 @@ impl SunManager {
         let freq_sun = 0.02;
         for chunk in &mut self.chunks {
             for inst in &mut chunk.instances {
-                // local coords
                 let lx = inst.position[0] - self.center[0];
                 let ly = inst.position[1] - self.center[1];
                 let lz = inst.position[2] - self.center[2];
@@ -348,20 +332,17 @@ impl SunManager {
                 let v2 = 0.5 * self.perlin2.get([py, pz + t, px]);
                 let sum = v1 + v2;
                 let mapped = 0.5 * (sum + 1.0);
-
-                // map => [3..4, 2.5..3.5, 0..0.5]
                 let r = 3.0 + 1.0 * mapped;
                 let g = 2.5 + 1.0 * mapped;
                 let b = 0.0 + 0.5 * mapped;
                 inst.color = [r as f32, g as f32, b as f32];
             }
-            // rewrite chunk
             let bytes = bytemuck::cast_slice(&chunk.instances);
             queue.write_buffer(&chunk.buffer, 0, bytes);
         }
     }
 
-    // fix lifetime error: mark function as draw_all<'a>(&'a self, rp:&mut wgpu::RenderPass<'a>,..)
+    // fix lifetime error => draw_all<'a>(&'a self, rp: &mut wgpu::RenderPass<'a>, index_count: u32)
     fn draw_all<'a>(&'a self, rp: &mut wgpu::RenderPass<'a>, index_count: u32) {
         for chunk in &self.chunks {
             rp.set_vertex_buffer(1, chunk.buffer.slice(..));
@@ -371,8 +352,7 @@ impl SunManager {
 }
 
 //
-// =================== MAIN STATE ===================
-//
+// =================== PROGRAM STATE ===================
 struct State {
     surface: wgpu::Surface,
     device: wgpu::Device,
@@ -394,10 +374,11 @@ struct State {
     dust_orbits: Vec<DustOrbit>,
     dust_instances: Vec<InstanceData>,
 
-    // combined for planet+cloud+atmosphere+dust
+    // combined
     base_instance_buffer: wgpu::Buffer,
     base_instance_count: u32,
 
+    // chunked sun
     sun_manager: SunManager,
 
     camera_uniform: CameraUniform,
@@ -414,13 +395,13 @@ struct State {
     camera_yaw: f32,
     camera_pitch: f32,
     camera_dist: f32,
+
     last_mouse_pos: Option<(f64, f64)>,
     mouse_pressed: bool,
 }
 
 impl State {
     async fn new(window: &winit::window::Window) -> Self {
-        // auto-detect Apple/Metal
         let instance = create_wgpu_instance();
         let size = window.inner_size();
         let surface = unsafe { instance.create_surface(window) }.unwrap();
@@ -489,7 +470,7 @@ impl State {
         let num_indices = INDICES.len() as u32;
 
         //
-        // Build planet, atmosphere, big blocky translucent clouds, dust
+        // Planet, atmosphere, clouds, dust
         //
         let planet_radius = 12.0;
         let mut planet_voxels = Vec::new();
@@ -502,8 +483,8 @@ impl State {
                     let fy = y as f32 + 0.5;
                     let fz = z as f32 + 0.5;
                     let dist = (fx*fx + fy*fy + fz*fz).sqrt();
-                    let bump = rng.gen_range(0.0..2.0);
-                    if dist < planet_radius + bump {
+                    let noise_bump = rng.gen_range(0.0..2.0);
+                    if dist < planet_radius + noise_bump {
                         planet_voxels.push(InstanceData {
                             position: [fx, fy, fz],
                             scale: [1.0, 1.0, 1.0],
@@ -525,13 +506,15 @@ impl State {
         // atmosphere
         let mut atmosphere_voxels = Vec::new();
         for v in &planet_voxels {
-            let dist = (v.position[0].powi(2) + v.position[1].powi(2) + v.position[2].powi(2)).sqrt();
+            let dist = (v.position[0]*v.position[0]
+                + v.position[1]*v.position[1]
+                + v.position[2]*v.position[2]).sqrt();
             if dist > planet_radius - 1.0 {
                 let outward = 1.05;
                 let pos = [
-                    v.position[0] * outward / dist.max(0.0001),
-                    v.position[1] * outward / dist.max(0.0001),
-                    v.position[2] * outward / dist.max(0.0001),
+                    v.position[0]*outward / dist.max(0.0001),
+                    v.position[1]*outward / dist.max(0.0001),
+                    v.position[2]*outward / dist.max(0.0001),
                 ];
                 atmosphere_voxels.push(InstanceData {
                     position: pos,
@@ -542,24 +525,23 @@ impl State {
             }
         }
 
-        // "Large block" clouds => physically bigger cubes, alpha < 1 => sparse
+        // big translucent blocks for clouds => also use perlin offset => movement
         let mut cloud_voxels = Vec::new();
         for v in &planet_voxels {
             let dist = (v.position[0].powi(2) + v.position[1].powi(2) + v.position[2].powi(2)).sqrt();
-            if dist > planet_radius - 1.0 && rng.gen_bool(0.15) {
-                // sparser => 15% chance
-                // bigger => scale= ~2 or 3
+            if dist > planet_radius - 1.0 && rng.gen_bool(0.2) {
+                // 20% => sparser
                 let outward = 1.1;
                 let pos = [
-                    v.position[0] * outward / dist.max(0.0001),
-                    v.position[1] * outward / dist.max(0.0001),
-                    v.position[2] * outward / dist.max(0.0001),
+                    v.position[0]*outward / dist.max(0.0001),
+                    v.position[1]*outward / dist.max(0.0001),
+                    v.position[2]*outward / dist.max(0.0001),
                 ];
                 cloud_voxels.push(InstanceData {
                     position: pos,
                     scale: [2.0, 2.0, 2.0],
                     color: [1.0, 1.0, 1.0],
-                    alpha: 0.3, // translucent large blocks
+                    alpha: 0.3,
                 });
             }
         }
@@ -572,6 +554,7 @@ impl State {
             let angle = rng.gen_range(0.0..std::f32::consts::TAU);
             let speed = rng.gen_range(0.005..0.02);
             let height = rng.gen_range(-6.0..6.0);
+
             dust_orbits.push(DustOrbit {
                 radius: orbit_r,
                 angle,
@@ -600,20 +583,22 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        // chunk-based sun => smaller radius=120, bigger block size=64 => fewer blocks
+        // chunked sun => smaller radius=120 => fewer voxels, chunk=64 => big blocks => faster
         let sun_manager = SunManager::new(120.0, 64, Perlin::new(1), Perlin::new(2));
 
         // camera uniform
-        let camera_uniform = CameraUniform { view_proj: Mat4::IDENTITY.to_cols_array() };
+        let camera_uniform = CameraUniform {
+            view_proj: Mat4::IDENTITY.to_cols_array(),
+        };
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("CameraBuffer"),
             contents: bytemuck::cast_slice(&camera_uniform.view_proj),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // sun pos
+        // sun pos uniform => must match sun_manager.center
         let sun_uniform = SunUniform {
-            sun_pos: [300.0, 0.0, -100.0, 1.0], // must match center
+            sun_pos: [300.0, 0.0, -100.0, 1.0],
         };
         let sun_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("SunPosBuffer"),
@@ -625,7 +610,6 @@ impl State {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Globals BGL"),
             entries: &[
-                // camera
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -636,7 +620,6 @@ impl State {
                     },
                     count: None,
                 },
-                // sun pos
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -653,18 +636,24 @@ impl State {
             label: Some("Globals BG"),
             layout: &bind_group_layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: camera_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: sun_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: sun_buffer.as_entire_binding(),
+                },
             ],
         });
 
         // WGSL shader
         let shader_src = r#"
 struct Globals {
-    viewProj: mat4x4<f32>,
+    viewProj: mat4x4<f32>;
 };
 struct Sun {
-    sunPos: vec4<f32>,
+    sunPos: vec4<f32>;
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -693,12 +682,19 @@ fn vs_main(
     inst: Instance
 ) -> VSOut {
     var out: VSOut;
-    let scaled = vec3<f32>(inPos.x * inst.scale.x, inPos.y * inst.scale.y, inPos.z * inst.scale.z);
+    let scaled = vec3<f32>(
+        inPos.x * inst.scale.x,
+        inPos.y * inst.scale.y,
+        inPos.z * inst.scale.z
+    );
     let worldPos = scaled + inst.pos;
     out.worldPos = worldPos;
 
-    // approximate normal
-    let fix = vec3<f32>(1.0/inst.scale.x, 1.0/inst.scale.y, 1.0/inst.scale.z);
+    let fix = vec3<f32>(
+        1.0/inst.scale.x,
+        1.0/inst.scale.y,
+        1.0/inst.scale.z
+    );
     out.normal = normalize(inNormal * fix);
 
     out.clipPos = globals.viewProj * vec4<f32>(worldPos, 1.0);
@@ -717,7 +713,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
     let dir = normalize(sunPos - in.worldPos);
     let lambert = max(dot(in.normal, dir), 0.0);
 
-    // handle alpha
+    // handle alpha => partial translucency
     let finalColor = in.color * lambert;
     return vec4<f32>(finalColor, in.alpha);
 }
@@ -728,7 +724,6 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             source: wgpu::ShaderSource::Wgsl(shader_src.into()),
         });
 
-        // pipeline layout
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("PipelineLayout"),
             bind_group_layouts: &[&bind_group_layout],
@@ -742,7 +737,6 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
                 module: &shader_module,
                 entry_point: "vs_main",
                 buffers: &[
-                    // geometry
                     wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<f32>() as wgpu::BufferAddress * 8,
                         step_mode: wgpu::VertexStepMode::Vertex,
@@ -753,34 +747,31 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
                                 format: wgpu::VertexFormat::Float32x3,
                             },
                             wgpu::VertexAttribute {
-                                offset: 4 * 3,
+                                offset: (4*3) as wgpu::BufferAddress,
                                 shader_location: 1,
                                 format: wgpu::VertexFormat::Float32x3,
                             },
                             wgpu::VertexAttribute {
-                                offset: 4 * 6,
+                                offset: (4*6) as wgpu::BufferAddress,
                                 shader_location: 2,
                                 format: wgpu::VertexFormat::Float32x2,
                             },
                         ],
                     },
-                    // instance
                     InstanceData::desc(),
                 ],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader_module,
                 entry_point: "fs_main",
-                targets: &[Some(
-                    wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState {
-                            color: wgpu::BlendComponent::OVER,
-                            alpha: wgpu::BlendComponent::OVER,
-                        }),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }
-                )],
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent::OVER,
+                        alpha: wgpu::BlendComponent::OVER,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -807,6 +798,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             size,
             render_pipeline,
             depth_texture_view,
+
             vertex_buffer,
             index_buffer,
             num_indices,
@@ -840,6 +832,9 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         }
     }
 
+    //
+    // ============ RESIZE ============
+    //
     fn resize(&mut self, new_size: PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
@@ -866,15 +861,14 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         }
     }
 
+    //
+    // ============ UPDATE ============
+    //
     fn update(&mut self) {
         self.time += 0.01;
 
-        // planet color changes, atmosphere, clouds
+        // planet color changes
         let freq_planet = 0.06;
-        let freq_atmo   = 0.04;
-        let freq_cloud  = 0.03;
-
-        // planet
         for v in &mut self.planet_voxels {
             let planet_r = 12.0;
             let polar_threshold = 0.9 * planet_r;
@@ -889,31 +883,42 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             let val1 = self.perlin1.get([px, py, pz + t]);
             let val2 = 0.5 * self.perlin2.get([pz, px, py + 1.5 * t]);
             let sum = val1 + val2;
-            let mapped = 0.5 * (sum + 1.0);
+            let mapped = 0.5*(sum + 1.0);
             let (r,g,b) = planet_color_map(mapped as f32);
             v.color = [r,g,b];
         }
 
         // atmosphere
+        let freq_atmo = 0.04;
         for a in &mut self.atmosphere_voxels {
             let px = a.position[0] as f64 * freq_atmo;
             let py = a.position[1] as f64 * freq_atmo;
             let pz = a.position[2] as f64 * freq_atmo;
             let t = self.time as f64 * 0.3;
             let val = self.perlin1.get([px, py, pz + t]);
-            let mapped = 0.5 * (val + 1.0);
+            let mapped = 0.5*(val + 1.0);
             let (r,g,b) = atmosphere_color_map(mapped as f32);
             a.color = [r,g,b];
         }
 
-        // clouds => large blocky, but we'll do minimal color changes => they'd remain white
-        // If you want them unchanged, skip color map. We'll do partial for continuity
+        // clouds => let them "move around slowly" by shifting positions
+        // We do a gentle offset from Perlin each frame
+        let freq_cloud = 0.002; // smaller => slower shift
         for c in &mut self.cloud_voxels {
-            // big block => we do not want fancy color => or do partial
-            c.alpha = 0.3; // keep them translucent
+            let (x,y,z) = (c.position[0], c.position[1], c.position[2]);
+            let px = x as f64 * freq_cloud;
+            let py = y as f64 * freq_cloud;
+            let pz = z as f64 * freq_cloud;
+            let t = self.time as f64 * 0.1; // slower
+            let shiftx = 0.2 * self.perlin1.get([px + t, py, pz]);
+            let shifty = 0.2 * self.perlin2.get([py + t, pz, px]);
+            // re-offset position
+            c.position[0] += shiftx as f32;
+            c.position[1] += shifty as f32;
+            // alpha stays 0.3 => translucent
         }
 
-        // dust orbits
+        // dust
         for (i, orbit) in self.dust_orbits.iter_mut().enumerate() {
             orbit.angle += orbit.speed;
             let x = orbit.radius * orbit.angle.cos();
@@ -931,15 +936,11 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         ].concat();
         self.queue.write_buffer(&self.base_instance_buffer, 0, bytemuck::cast_slice(&re_combined));
 
-        //
-        // Sun => generate chunks + update color
-        //
+        // sun => generate some chunks, update color
         self.sun_manager.generate_chunks_per_frame(&self.device, &self.queue, 5);
         self.sun_manager.update_color_perlin(&self.queue, self.time);
 
-        //
-        // Camera
-        //
+        // camera
         let aspect = self.config.width as f32 / self.config.height as f32;
         let fovy = 45f32.to_radians();
         let near = 0.1;
@@ -961,6 +962,9 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         );
     }
 
+    //
+    // ============ RENDER ============
+    //
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let frame = self.surface.get_current_texture()?;
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -971,16 +975,25 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         {
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("MainRenderPass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(
-                            wgpu::Color { r: 0.0, g: 0.0, b: 0.01, a: 1.0 }
-                        ),
-                        store: true,
-                    },
-                })],
+                color_attachments: &[
+                    Some(
+                        wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(
+                                    wgpu::Color {
+                                        r: 0.0,
+                                        g: 0.0,
+                                        b: 0.01,
+                                        a: 1.0,
+                                    }
+                                ),
+                                store: true,
+                            },
+                        }
+                    )
+                ],
                 depth_stencil_attachment: Some(
                     wgpu::RenderPassDepthStencilAttachment {
                         view: &self.depth_texture_view,
@@ -996,13 +1009,13 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
             rp.set_pipeline(&self.render_pipeline);
             rp.set_bind_group(0, &self.bind_group, &[]);
 
-            // draw planet+atmosphere+clouds+dust
+            // draw planet+atmo+cloud+dust
             rp.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             rp.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             rp.set_vertex_buffer(1, self.base_instance_buffer.slice(..));
             rp.draw_indexed(0..self.num_indices, 0, 0..self.base_instance_count);
 
-            // draw all sun chunks
+            // sun
             self.sun_manager.draw_all(&mut rp, self.num_indices);
         }
 
@@ -1011,6 +1024,9 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
         Ok(())
     }
 
+    //
+    // ============ INPUT ============
+    //
     fn input(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::MouseInput { state, button, .. } => {
@@ -1066,7 +1082,7 @@ fn main() {
 async fn run() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-        .with_title("Gigantic Sun + Planet + Clouds + Perlin, Apple Silicon/Metal autodetect")
+        .with_title("WGSL Voxel Planet + Big Sun + Clouds + Apple/Metal autodetect")
         .build(&event_loop)
         .unwrap();
 
@@ -1086,11 +1102,11 @@ async fn run() {
                     ..
                 } => *control_flow = ControlFlow::Exit,
 
-                WindowEvent::Resized(physical_size) => {
-                    state.resize(*physical_size);
+                WindowEvent::Resized(new_size) => {
+                    state.resize(PhysicalSize::new(new_size.width, new_size.height));
                 }
                 WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                    state.resize(**new_inner_size);
+                    state.resize(PhysicalSize::new(new_inner_size.width, new_inner_size.height));
                 }
                 _ => {
                     state.input(&event);
@@ -1100,7 +1116,9 @@ async fn run() {
                 state.update();
                 match state.render() {
                     Ok(_) => {}
-                    Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
+                    Err(wgpu::SurfaceError::Lost) => {
+                        state.resize(PhysicalSize::new(state.size.width, state.size.height));
+                    }
                     Err(wgpu::SurfaceError::OutOfMemory) => {
                         *control_flow = ControlFlow::Exit;
                     }
